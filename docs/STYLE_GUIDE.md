@@ -81,6 +81,41 @@ from tnbbeta_vae.registry import build_model
 
 Run `uv run ruff check --fix .` to auto-sort imports.
 
+## Code organization: private helpers go at the bottom
+
+Underscore-prefixed (private) **functions and methods** are placed after
+the public API in their module or class, not before it -- a reader
+shouldn't have to scroll past implementation details to find the actual
+interface. This is not enforced by tooling; keep it in mind during review.
+
+```python
+class Foo:
+    def public_method(self) -> int:
+        return self._helper()
+
+    def _helper(self) -> int:  # after public_method, not before
+        ...
+
+
+def public_function() -> None:
+    _module_helper()
+
+
+def _module_helper() -> None:  # after public_function
+    ...
+```
+
+This applies to functions/methods only -- classes (including small
+support classes and test doubles like `_DummyModel`) stay wherever is
+clearest, usually near the top, before first use.
+
+**Exception**: a private definition referenced at class-definition time
+(assigned to a class attribute, e.g. `support = _unit_sphere`, or used in
+a decorator) must stay *before* the class that uses it -- Python executes
+class bodies immediately, so a forward reference there fails. Only
+helpers called from inside a method body (i.e. at call time, once the
+whole module has already loaded) are free to move below.
+
 ## Type checking
 
 - **Type checker**: `pyright`, in `standard` mode, configured under

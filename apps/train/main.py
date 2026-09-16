@@ -13,22 +13,6 @@ import sys
 from tnbbeta_vae.registry import build_model, list_registered_models
 
 
-def _parse_overrides(pairs: list[str]) -> dict[str, str]:
-    """Parses ``key=value`` strings into a dict.
-
-    Args:
-        pairs: Strings of the form ``"key=value"``.
-
-    Returns:
-        Mapping from key to value.
-    """
-    overrides: dict[str, str] = {}
-    for pair in pairs:
-        key, _, value = pair.partition("=")
-        overrides[key] = value
-    return overrides
-
-
 def main(argv: list[str] | None = None) -> None:
     """Parses CLI args and either lists or builds/trains a registered model.
 
@@ -66,6 +50,22 @@ def main(argv: list[str] | None = None) -> None:
         "tnbbeta_vae.data.cifar10) and a concrete Trainer.fit() call are "
         "still needed."
     )
+
+
+def _parse_overrides(pairs: list[str]) -> dict[str, str]:
+    """Parses ``key=value`` strings into a dict.
+
+    Args:
+        pairs: Strings of the form ``"key=value"``.
+
+    Returns:
+        Mapping from key to value.
+    """
+    overrides: dict[str, str] = {}
+    for pair in pairs:
+        key, _, value = pair.partition("=")
+        overrides[key] = value
+    return overrides
 
 
 if __name__ == "__main__":

@@ -58,20 +58,6 @@ class RunLogger:
         (self.run_dir / "config.json").write_text(config.model_dump_json(indent=2))
         self._write_metadata(ended_at=None)
 
-    @staticmethod
-    def _make_run_id() -> str:
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        return f"{timestamp}-{uuid.uuid4().hex[:8]}"
-
-    def _write_metadata(self, *, ended_at: datetime | None) -> None:
-        metadata = {
-            "run_id": self.run_id,
-            "model_name": self.model_name,
-            "started_at": self._started_at.isoformat(),
-            "ended_at": ended_at.isoformat() if ended_at else None,
-        }
-        (self.run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))
-
     def log_metrics(self, step: int, metrics: Mapping[str, float]) -> None:
         """Appends one line of metrics to ``metrics.jsonl``.
 
@@ -90,3 +76,17 @@ class RunLogger:
     def close(self) -> None:
         """Marks the run as finished by recording an end timestamp."""
         self._write_metadata(ended_at=datetime.now(UTC))
+
+    @staticmethod
+    def _make_run_id() -> str:
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        return f"{timestamp}-{uuid.uuid4().hex[:8]}"
+
+    def _write_metadata(self, *, ended_at: datetime | None) -> None:
+        metadata = {
+            "run_id": self.run_id,
+            "model_name": self.model_name,
+            "started_at": self._started_at.isoformat(),
+            "ended_at": ended_at.isoformat() if ended_at else None,
+        }
+        (self.run_dir / "metadata.json").write_text(json.dumps(metadata, indent=2))

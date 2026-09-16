@@ -1,7 +1,7 @@
 # tnbbeta_vae
 
 ![CI](https://github.com/Dant86/tnbbeta_vae/actions/workflows/ci.yml/badge.svg?branch=master)
-![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen)
 
 Extending the **triply-randomized negative binomial beta (TNBbeta)**
 distribution -- introduced in Lederman & Schein (2026),
@@ -60,7 +60,7 @@ Each run's config and metrics are logged locally under `runs/<run_id>/`
 
 ## Test coverage
 
-Current coverage: **94%** (`src/tnbbeta_vae`). Generated locally via:
+Current coverage: **97%** (`src/tnbbeta_vae`). Generated locally via:
 
 ```bash
 uv run pytest

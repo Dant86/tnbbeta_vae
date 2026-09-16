@@ -22,16 +22,6 @@ class _DummyModel:
         self.config = config
 
 
-@pytest.fixture(autouse=True)
-def _clean_registry() -> Iterator[None]:
-    """Isolates each test's registrations from the module-level registry."""
-    saved = dict(registry._REGISTRY)
-    registry._REGISTRY.clear()
-    yield
-    registry._REGISTRY.clear()
-    registry._REGISTRY.update(saved)
-
-
 def test_register_and_build_model() -> None:
     registry.register_model("dummy", config_cls=_DummyConfig)(_DummyModel)
 
@@ -58,3 +48,13 @@ def test_list_registered_models_sorted() -> None:
     registry.register_model("alpha", config_cls=_DummyConfig)(_DummyModel)
 
     assert registry.list_registered_models() == ["alpha", "zeta"]
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry() -> Iterator[None]:
+    """Isolates each test's registrations from the module-level registry."""
+    saved = dict(registry._REGISTRY)
+    registry._REGISTRY.clear()
+    yield
+    registry._REGISTRY.clear()
+    registry._REGISTRY.update(saved)

@@ -14,41 +14,6 @@ from tnbbeta_vae.distributions import TNBBetaUnivariate
 _AUXILIARY_CONSTRUCTION_N_MAX = 150
 
 
-def _log_prob_via_auxiliary_construction(
-    y: float,
-    p: float,
-    q: float,
-    epsilon: float,
-    n_max: int = _AUXILIARY_CONSTRUCTION_N_MAX,
-) -> torch.Tensor:
-    """Computes log TNBbeta(y; p, q, eps) from Theorem 4.1's construction (Eq. 17).
-
-    This is a second, independent characterization of the same density as
-    log_prob's Eq. 13: C ~ NB(eps, 1-q), A|C ~ NB(eps+C, 1-p),
-    B|C ~ NB(eps+C, p), Y|A,B,C ~ Beta(eps+C+A, eps+C+B). The marginal
-    log-density is a triple sum over the (discrete) auxiliary variables,
-    truncated here to `n_max` per variable and evaluated via logsumexp.
-    """
-    dtype = torch.float64
-    y_t = torch.as_tensor(y, dtype=dtype)
-    p_t = torch.as_tensor(p, dtype=dtype)
-    q_t = torch.as_tensor(q, dtype=dtype)
-    eps_t = torch.as_tensor(epsilon, dtype=dtype)
-
-    counts = torch.arange(n_max + 1, dtype=dtype)
-    c = counts.view(-1, 1, 1)
-    a = counts.view(1, -1, 1)
-    b = counts.view(1, 1, -1)
-
-    log_p_c = NegativeBinomial(total_count=eps_t, probs=q_t).log_prob(c)
-    log_p_a = NegativeBinomial(total_count=eps_t + c, probs=p_t).log_prob(a)
-    log_p_b = NegativeBinomial(total_count=eps_t + c, probs=1 - p_t).log_prob(b)
-    log_p_y = Beta(eps_t + c + a, eps_t + c + b).log_prob(y_t)
-
-    joint_log_prob = log_p_c + log_p_a + log_p_b + log_p_y
-    return torch.logsumexp(joint_log_prob.reshape(-1), dim=0)
-
-
 def test_median_matches_p_parameter() -> None:
     """Theorem 3.1: median(Y) = p exactly, so the sample median should too."""
     torch.manual_seed(0)
@@ -185,3 +150,38 @@ def test_rsample_is_differentiable_wrt_all_parameters() -> None:
         assert grad is not None
         assert torch.isfinite(grad).all()
         assert grad.abs().sum() > 0, param
+
+
+def _log_prob_via_auxiliary_construction(
+    y: float,
+    p: float,
+    q: float,
+    epsilon: float,
+    n_max: int = _AUXILIARY_CONSTRUCTION_N_MAX,
+) -> torch.Tensor:
+    """Computes log TNBbeta(y; p, q, eps) from Theorem 4.1's construction (Eq. 17).
+
+    This is a second, independent characterization of the same density as
+    log_prob's Eq. 13: C ~ NB(eps, 1-q), A|C ~ NB(eps+C, 1-p),
+    B|C ~ NB(eps+C, p), Y|A,B,C ~ Beta(eps+C+A, eps+C+B). The marginal
+    log-density is a triple sum over the (discrete) auxiliary variables,
+    truncated here to `n_max` per variable and evaluated via logsumexp.
+    """
+    dtype = torch.float64
+    y_t = torch.as_tensor(y, dtype=dtype)
+    p_t = torch.as_tensor(p, dtype=dtype)
+    q_t = torch.as_tensor(q, dtype=dtype)
+    eps_t = torch.as_tensor(epsilon, dtype=dtype)
+
+    counts = torch.arange(n_max + 1, dtype=dtype)
+    c = counts.view(-1, 1, 1)
+    a = counts.view(1, -1, 1)
+    b = counts.view(1, 1, -1)
+
+    log_p_c = NegativeBinomial(total_count=eps_t, probs=q_t).log_prob(c)
+    log_p_a = NegativeBinomial(total_count=eps_t + c, probs=p_t).log_prob(a)
+    log_p_b = NegativeBinomial(total_count=eps_t + c, probs=1 - p_t).log_prob(b)
+    log_p_y = Beta(eps_t + c + a, eps_t + c + b).log_prob(y_t)
+
+    joint_log_prob = log_p_c + log_p_a + log_p_b + log_p_y
+    return torch.logsumexp(joint_log_prob.reshape(-1), dim=0)
