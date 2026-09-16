@@ -13,8 +13,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   distribution (Lederman & Schein, 2026, arXiv:2606.11624), with
   closed-form `log_prob` and reparameterized (`rsample`) sampling via a
   deterministic transform of a `Beta(eps, eps)` draw.
-- `tnbbeta_vae.distributions.TNBBetaSpherical`: design stub for the
-  hyperspherical extension (not yet implemented).
+- `tnbbeta_vae.distributions.TNBBetaSpherical`: TNBbeta lifted to the unit
+  hypersphere via a Householder reflection (mirroring the von
+  Mises-Fisher/Power Spherical construction), with closed-form `log_prob`
+  and reparameterized `rsample`.
 - `tnbbeta_vae.registry`: Pydantic-config-based model registry
   (`register_model`, `build_model`, `list_registered_models`).
 - `tnbbeta_vae.training`: generic `Trainer` loop and local JSON/YAML

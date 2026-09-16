@@ -89,18 +89,6 @@ class TNBBetaUnivariate(Distribution):
         """Returns the median, which equals ``p`` exactly (Theorem 3.1)."""
         return self.p
 
-    def _similarity(self, value: Tensor) -> Tensor:
-        """Computes gamma(y, p), the log-odds similarity function (Eq. 14)."""
-        y = value
-        denom = self.p * (1 - y) + (1 - self.p) * y
-        return (
-            torch.log(y)
-            + torch.log1p(-y)
-            + torch.log(self.p)
-            + torch.log1p(-self.p)
-            - 2 * torch.log(denom)
-        )
-
     def log_prob(self, value: Tensor) -> Tensor:
         """Computes the log-density at ``value``.
 
@@ -166,3 +154,15 @@ class TNBBetaUnivariate(Distribution):
         s = 2 * z - 1
         u = (1 + s * torch.sqrt((1 - q) / (1 - q * s**2))) / 2
         return p * u / ((1 - p) * (1 - u) + p * u)
+
+    def _similarity(self, value: Tensor) -> Tensor:
+        """Computes gamma(y, p), the log-odds similarity function (Eq. 14)."""
+        y = value
+        denom = self.p * (1 - y) + (1 - self.p) * y
+        return (
+            torch.log(y)
+            + torch.log1p(-y)
+            + torch.log(self.p)
+            + torch.log1p(-self.p)
+            - 2 * torch.log(denom)
+        )
