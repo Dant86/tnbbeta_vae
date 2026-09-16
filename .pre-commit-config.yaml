@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format-and-stage
+        name: ruff format (then re-stage)
+        description: >-
+          Formats staged Python files with `ruff format` and re-stages
+          them, so the committed content is always formatted.
+        entry: scripts/pre_commit_format_and_stage.sh
+        language: system
+        types: [python]
+        exclude: ^notebooks/
+        require_serial: true
+
+      - id: ruff-check
+        name: ruff check (staged files)
+        description: Lints staged Python files with `ruff check`.
+        entry: uv run ruff check --force-exclude
+        language: system
+        types: [python]
+        exclude: ^notebooks/

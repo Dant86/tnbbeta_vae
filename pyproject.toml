@@ -1,0 +1,95 @@
+[project]
+name = "tnbbeta-vae"
+version = "0.1.0"
+description = "Extending the triply-randomized negative binomial beta (TNBbeta) distribution to the unit hypersphere for VAE latent priors."
+readme = "README.md"
+authors = [
+    { name = "Vedant Pathak", email = "vedantdpathak@iCloud.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "jupyterlab>=4.6.3",
+    "numpy>=2.5.3",
+    "pandas>=3.0.5",
+    "plotly>=7.1.0",
+    "pydantic>=2.13.5",
+    "pyyaml>=6.0.3",
+    "torch>=2.14.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.3,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.7",
+]
+
+[tool.uv.build-backend]
+module-name = "tnbbeta_vae"
+module-root = "src"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "D",   # pydocstyle
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "N",   # pep8-naming
+]
+ignore = [
+    "D100", # missing docstring in public module
+    "D104", # missing docstring in public package
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["tnbbeta_vae"]
+force-sort-within-sections = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+"apps/**" = ["D"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.pyright]
+include = ["src", "apps", "tests"]
+exclude = ["notebooks", "**/__pycache__"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=tnbbeta_vae --cov-report=term-missing --cov-report=xml"
+
+[tool.coverage.run]
+source = ["src/tnbbeta_vae"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+]
