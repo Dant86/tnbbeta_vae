@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import torch
 from torch import Tensor
-from torch.distributions import Beta, Distribution, NegativeBinomial, constraints
+from torch.distributions import Beta, Distribution, constraints
 from torch.distributions.utils import broadcast_all
 from torch.types import _size
 
@@ -43,11 +43,12 @@ class TNBBetaUnivariate(Distribution):
             for epsilon > 1.
 
     Note:
-        Sampling uses the exact auxiliary-variable construction of
-        Theorem 4.1: ``C ~ NB(eps, 1-q)``, ``A | C ~ NB(eps+C, 1-p)``,
-        ``B | C ~ NB(eps+C, p)``, ``Y | A, B, C ~ Beta(eps+C+A, eps+C+B)``.
-        This construction is not reparameterizable (it bottoms out in
-        discrete negative binomial draws), so ``rsample`` is not provided.
+        Sampling uses a fully deterministic, differentiable transform of a
+        single ``Beta(eps, eps)`` draw -- not the (non-reparameterizable)
+        auxiliary negative-binomial construction of Theorem 4.1. See
+        :meth:`rsample` for the derivation. ``sample`` is inherited from
+        :class:`~torch.distributions.Distribution`, which calls ``rsample``
+        under ``torch.no_grad()``.
     """
 
     # torch.distributions subclasses always override these class-level
@@ -61,7 +62,7 @@ class TNBBetaUnivariate(Distribution):
     support = constraints.interval(  # pyright: ignore[reportIncompatibleMethodOverride, reportAssignmentType]
         0.0, 1.0
     )
-    has_rsample = False
+    has_rsample = True
 
     def __init__(
         self,
@@ -132,22 +133,36 @@ class TNBBetaUnivariate(Distribution):
             - (self.epsilon + 0.5) * torch.log1p(-4 * self.q * gamma)
         )
 
-    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:  # noqa: B008
-        """Draws exact samples via the auxiliary negative-binomial construction.
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:  # noqa: B008
+        """Draws reparameterized samples via a deterministic Beta(eps, eps) transform.
+
+        Derivation: writing ``T = logit(Y) - logit(p)``, the TNBbeta density
+        (Eq. 13) has the change-of-variables form (via ``S = tanh(T/2)``)
+
+            ``f_S(s) ~ (1 - s^2)^(eps-1) * ((1-q) + q*s^2)^-(eps+1/2)``.
+
+        A plain (shifted) ``Beta(eps, eps)`` draw has density
+        ``(1 - s^2)^(eps-1)`` on ``(-1, 1)`` -- i.e. the ``q=0`` special
+        case (this matches Corollary 3.1's ``TNBbeta(p, 0, eps) ~
+        LNbeta(eps, eps, (1-p)/p)`` reduction). The map below carries that
+        plain density onto the ``q``-tilted one exactly (verified directly
+        by change-of-variables: it's a bijection on ``(-1, 1)`` with
+        Jacobian ``sqrt(1-q) / (1 - q*s^2)^(3/2)``), so no accept-reject or
+        implicit-CDF machinery is needed to handle ``q != 0``.
 
         Args:
             sample_shape: Shape of the i.i.d. sample batch to draw.
 
         Returns:
-            Samples in (0, 1) with shape ``sample_shape + batch_shape``.
+            Samples in (0, 1) with shape ``sample_shape + batch_shape``,
+            differentiable w.r.t. ``p``, ``q``, and ``epsilon``.
         """
         shape = self._extended_shape(sample_shape)
         p = self.p.expand(shape)
         q = self.q.expand(shape)
-        eps = self.epsilon.expand(shape)
+        epsilon = self.epsilon.expand(shape)
 
-        with torch.no_grad():
-            c = NegativeBinomial(total_count=eps, probs=q).sample()
-            a = NegativeBinomial(total_count=eps + c, probs=p).sample()
-            b = NegativeBinomial(total_count=eps + c, probs=1 - p).sample()
-            return Beta(eps + c + a, eps + c + b).sample()
+        z = Beta(epsilon, epsilon).rsample()
+        s = 2 * z - 1
+        u = (1 + s * torch.sqrt((1 - q) / (1 - q * s**2))) / 2
+        return p * u / ((1 - p) * (1 - u) + p * u)

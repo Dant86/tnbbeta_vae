@@ -11,8 +11,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   GitHub Actions CI, branch protection.
 - `tnbbeta_vae.distributions.TNBBetaUnivariate`: the univariate TNBbeta
   distribution (Lederman & Schein, 2026, arXiv:2606.11624), with
-  closed-form `log_prob` and exact sampling via its auxiliary
-  negative-binomial construction.
+  closed-form `log_prob` and reparameterized (`rsample`) sampling via a
+  deterministic transform of a `Beta(eps, eps)` draw.
 - `tnbbeta_vae.distributions.TNBBetaSpherical`: design stub for the
   hyperspherical extension (not yet implemented).
 - `tnbbeta_vae.registry`: Pydantic-config-based model registry

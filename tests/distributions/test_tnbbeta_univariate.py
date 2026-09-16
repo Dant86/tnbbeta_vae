@@ -69,3 +69,41 @@ def test_broadcasts_batch_shape() -> None:
 
     assert dist.batch_shape == torch.Size([2])
     assert dist.log_prob(torch.tensor([0.2, 0.5])).shape == torch.Size([2])
+
+
+def test_rsample_matches_analytic_mean() -> None:
+    """Cross-checks the rsample() transform against log_prob via numerical integration.
+
+    This independently validates the rsample() derivation: if the
+    transform were wrong (e.g. sign error, wrong q-tilt), the empirical
+    mean of its draws would drift from the mean implied by log_prob,
+    which is validated separately (test_log_prob_integrates_to_one).
+    """
+    torch.manual_seed(2)
+    p, q, epsilon = 0.35, 0.8, 1.0
+    dist = TNBBetaUnivariate(p=p, q=q, epsilon=epsilon)
+
+    y = torch.linspace(1e-4, 1 - 1e-4, 200_000)
+    analytic_mean = torch.trapz(y * dist.log_prob(y).exp(), y)
+
+    samples = dist.rsample((100_000,))
+
+    assert torch.abs(samples.mean() - analytic_mean) < 0.01
+
+
+def test_rsample_is_differentiable_wrt_all_parameters() -> None:
+    """rsample() must be reparameterized: gradients should flow to p, q, epsilon."""
+    torch.manual_seed(3)
+    p = torch.tensor(0.4, requires_grad=True)
+    q = torch.tensor(0.6, requires_grad=True)
+    epsilon = torch.tensor(1.2, requires_grad=True)
+    dist = TNBBetaUnivariate(p=p, q=q, epsilon=epsilon)
+
+    y = dist.rsample((1_000,))
+    y.sum().backward()
+
+    assert dist.has_rsample
+    for param, grad in ((p, p.grad), (q, q.grad), (epsilon, epsilon.grad)):
+        assert grad is not None
+        assert torch.isfinite(grad).all()
+        assert grad.abs().sum() > 0, param
