@@ -16,6 +16,7 @@ from torch import Tensor, nn
 
 from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
+from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
 from tnbbeta_vae.models.priors.tnbbeta_spherical import FixedTNBBetaSphericalPrior
 from tnbbeta_vae.registry import register_model
@@ -113,7 +114,10 @@ class ConvTNBBetaSphericalVAE(nn.Module):
 
         Returns:
             A dict with ``"loss"`` (the mean negative ELBO), plus
-            ``"log_likelihood"`` and ``"kl"`` for logging.
+            ``"log_likelihood"``, ``"kl"``, and posterior-collapse
+            diagnostics (see
+            :func:`tnbbeta_vae.models.diagnostics.tnbbeta_spherical_posterior_diagnostics`)
+            for logging.
         """
         posterior = self._encode(batch)
         prior = self.prior()
@@ -129,6 +133,7 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             "loss": -elbo_terms["elbo"].mean(),
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
+            **tnbbeta_spherical_posterior_diagnostics(posterior),
         }
 
     def _encode(self, x: Tensor) -> TNBBetaSpherical:

@@ -45,8 +45,16 @@ automatically on commit, excluding `notebooks/`.
 - `src/tnbbeta_vae/models/`: `conv_vae.py`'s `ConvTNBBetaSphericalVAE` is
   the first concrete model -- a simple conv encoder/decoder with a
   `TNBBetaSpherical` posterior/prior, trained via
-  `models/losses/elbo.py`'s `monte_carlo_elbo` (a generic single-sample
-  MC ELBO, not a closed-form KL -- TNBBetaSpherical has none).
+  `models/losses/elbo.py`'s `monte_carlo_elbo` (a generic Monte Carlo
+  ELBO averaged over `num_samples` draws, not a closed-form KL --
+  TNBBetaSpherical has none, for the same reason von Mises-Fisher's KL
+  between differing mean directions doesn't reduce to one). `p -> 0, q ->
+  1` is a known posterior-collapse failure mode in this parameterization
+  (the point mass lands wherever the prior already is, independent of
+  `x`) -- `models/diagnostics.py`'s `tnbbeta_spherical_posterior_diagnostics`
+  logs the statistics to watch for it, and `tnbbeta_vae.data.gaussian_blob_batch`
+  is a synthetic dataset (known hue/position factors) for testing against
+  it locally before touching real data.
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
   `training_step`, not in `Trainer`.

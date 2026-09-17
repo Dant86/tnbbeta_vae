@@ -67,6 +67,41 @@ driving `Trainer.fit()` end-to-end needs a real dataloader first.
 Each run's config and metrics are logged locally under `runs/<run_id>/`
 (see `tnbbeta_vae.training.RunLogger`) for later inspection.
 
+### Posterior collapse diagnostics
+
+`p -> 0, q -> 1` (the posterior collapsing to a point mass sitting
+wherever the prior already is, independent of `x`) is a known failure
+mode worth watching for. Every `training_step` call logs
+`posterior_p_{mean,min,max}`, `posterior_q_{mean,min,max}`, and
+`posterior_direction_pairwise_cosine_mean` (see
+`tnbbeta_vae.models.diagnostics`) alongside `loss`/`kl` -- a collapse
+shows up as `q` trending toward 1 and/or the pairwise cosine trending
+toward 1 (the encoder converging to ~the same direction for every input)
+in `runs/<run_id>/metrics.jsonl`.
+
+For fast local iteration before touching real data,
+`tnbbeta_vae.data.gaussian_blob_batch` generates small synthetic images
+(a colored Gaussian blob with known hue/position) with ground-truth
+generative factors, so reconstructing well genuinely requires the latent
+code to carry information about `x`:
+
+```python
+import torch
+from tnbbeta_vae.data import gaussian_blob_batch
+from tnbbeta_vae.models import ConvTNBBetaSphericalVAE, ConvTNBBetaSphericalVAEConfig
+from tnbbeta_vae.training import Trainer
+
+model = ConvTNBBetaSphericalVAE(ConvTNBBetaSphericalVAEConfig(latent_dim=8))
+trainer = Trainer(
+    model,
+    torch.optim.Adam(model.parameters(), lr=1e-3),
+    "conv_tnbbeta_spherical_vae",
+    model.config,
+)
+dataloader = [gaussian_blob_batch(batch_size=32)[0] for _ in range(200)]
+trainer.fit(dataloader, num_epochs=10)
+```
+
 ## Test coverage
 
 Current coverage: **98%** (`src/tnbbeta_vae`). Generated locally via:
