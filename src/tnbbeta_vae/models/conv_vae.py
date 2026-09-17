@@ -41,6 +41,10 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
         prior_epsilon: Fixed prior boundary parameter, > 0.
         likelihood_scale: Fixed standard deviation of the Gaussian
             reconstruction likelihood.
+        num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
+            estimate. Higher values lower variance (there's no
+            closed-form KL to fall back on here) at the cost of that many
+            extra decoder calls per training step.
     """
 
     image_channels: int = 3
@@ -51,6 +55,7 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     prior_q: float = 0.9
     prior_epsilon: float = 1.0
     likelihood_scale: float = 1.0
+    num_elbo_samples: int = 1
 
 
 @register_model("conv_tnbbeta_spherical_vae", config_cls=ConvTNBBetaSphericalVAEConfig)
@@ -110,10 +115,15 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             A dict with ``"loss"`` (the mean negative ELBO), plus
             ``"log_likelihood"`` and ``"kl"`` for logging.
         """
-        reconstruction, posterior, z = self(batch)
+        posterior = self._encode(batch)
         prior = self.prior()
         elbo_terms = monte_carlo_elbo(
-            batch, reconstruction, z, posterior, prior, self.config.likelihood_scale
+            batch,
+            posterior,
+            prior,
+            self.decoder,
+            self.config.likelihood_scale,
+            self.config.num_elbo_samples,
         )
         return {
             "loss": -elbo_terms["elbo"].mean(),

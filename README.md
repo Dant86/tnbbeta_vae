@@ -58,7 +58,8 @@ these tools and by the pre-commit hooks.
 `conv_tnbbeta_spherical_vae` is the first registered model: a simple
 conv encoder/decoder VAE with a `TNBBetaSpherical` latent posterior/prior
 (see `tnbbeta_vae.models.conv_vae`), trained by maximizing a generic
-single-sample Monte Carlo ELBO (`tnbbeta_vae.models.losses.monte_carlo_elbo`).
+Monte Carlo ELBO (`tnbbeta_vae.models.losses.monte_carlo_elbo`,
+averaged over `num_elbo_samples` draws).
 CIFAR-10 loading isn't wired up yet (`tnbbeta_vae.data.cifar10` is a
 stub), so `apps/train/main.py` currently builds the model and stops --
 driving `Trainer.fit()` end-to-end needs a real dataloader first.
