@@ -10,5 +10,10 @@ from tnbbeta_vae.models.conv_vae import (
     ConvTNBBetaSphericalVAE,
     ConvTNBBetaSphericalVAEConfig,
 )
+from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 
-__all__ = ["ConvTNBBetaSphericalVAE", "ConvTNBBetaSphericalVAEConfig"]
+__all__ = [
+    "ConvTNBBetaSphericalVAE",
+    "ConvTNBBetaSphericalVAEConfig",
+    "tnbbeta_spherical_posterior_diagnostics",
+]

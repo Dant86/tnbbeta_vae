@@ -34,3 +34,10 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `tnbbeta_vae.models.priors.FixedTNBBetaSphericalPrior`: a fixed,
   non-learnable `TNBBetaSpherical` prior (mirrors the role of N(0, I) in
   a vanilla VAE).
+- `tnbbeta_vae.models.diagnostics.tnbbeta_spherical_posterior_diagnostics`:
+  per-batch posterior-collapse statistics (p/q min/mean/max, pairwise
+  mean-direction cosine similarity), now logged by `ConvTNBBetaSphericalVAE
+  .training_step` alongside loss/kl.
+- `tnbbeta_vae.data.gaussian_blob_batch`: a synthetic dataset with known
+  ground-truth generative factors (hue, position), for fast local
+  experiments before touching real data.

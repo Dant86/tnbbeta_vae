@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import math
 from pathlib import Path
 
 import pytest
 import torch
 
+from tnbbeta_vae.data import gaussian_blob_batch
 from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models import ConvTNBBetaSphericalVAE, ConvTNBBetaSphericalVAEConfig
 from tnbbeta_vae.registry import build_model, list_registered_models
@@ -45,7 +48,20 @@ def test_training_step_returns_finite_loss_and_metrics() -> None:
 
     outputs = model.training_step(x)
 
-    assert set(outputs) == {"loss", "log_likelihood", "kl"}
+    expected_keys = {
+        "loss",
+        "log_likelihood",
+        "kl",
+        "posterior_p_mean",
+        "posterior_p_min",
+        "posterior_p_max",
+        "posterior_q_mean",
+        "posterior_q_min",
+        "posterior_q_max",
+        "posterior_epsilon_mean",
+        "posterior_direction_pairwise_cosine_mean",
+    }
+    assert set(outputs) == expected_keys
     for value in outputs.values():
         assert value.dim() == 0
         assert torch.isfinite(value)
@@ -103,10 +119,10 @@ def test_training_step_gradients_flow_to_every_parameter() -> None:
         assert torch.isfinite(param.grad).all(), name
 
 
-def test_trainer_runs_end_to_end_on_synthetic_batches(
+def test_trainer_runs_end_to_end_on_random_batches(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Smoke test: the real model, the real Trainer, a tiny synthetic dataset."""
+    """Smoke test: the real model, the real Trainer, unstructured random batches."""
     monkeypatch.chdir(tmp_path)
     torch.manual_seed(3)
     model = _small_model()
@@ -124,6 +140,42 @@ def test_trainer_runs_end_to_end_on_synthetic_batches(
     metrics_path = trainer.run_logger.run_dir / "metrics.jsonl"
     assert metrics_path.exists()
     assert len(metrics_path.read_text().splitlines()) > 0
+
+
+def test_trainer_runs_end_to_end_on_gaussian_blob_batches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Smoke test with the actual collapse-diagnostic synthetic dataset.
+
+    Confirms the full pipeline (model, Trainer, RunLogger) works with
+    tnbbeta_vae.data.gaussian_blob_batch end to end, and that the
+    posterior-collapse diagnostics make it into the logged metrics --
+    this is the setup meant for locally watching p/q/cosine trends over
+    a real (if small) run.
+    """
+    monkeypatch.chdir(tmp_path)
+    torch.manual_seed(6)
+    model = _small_model()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        model_name="conv_tnbbeta_spherical_vae",
+        config=model.config,
+    )
+    dataloader = [gaussian_blob_batch(batch_size=8, image_size=32)[0] for _ in range(3)]
+
+    trainer.fit(dataloader, num_epochs=2)
+
+    metrics_path = trainer.run_logger.run_dir / "metrics.jsonl"
+    records = [json.loads(line) for line in metrics_path.read_text().splitlines()]
+    step_records = [r for r in records if "loss" in r]
+    assert len(step_records) == 3 * 2
+    assert all(math.isfinite(r["posterior_q_max"]) for r in step_records)
+    assert all(
+        math.isfinite(r["posterior_direction_pairwise_cosine_mean"])
+        for r in step_records
+    )
 
 
 def _small_model() -> ConvTNBBetaSphericalVAE:
