@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+import tnbbeta_vae.models  # noqa: F401 -- import for its @register_model side effects
 from tnbbeta_vae.registry import build_model, list_registered_models
 
 

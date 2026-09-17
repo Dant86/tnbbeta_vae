@@ -21,3 +21,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`register_model`, `build_model`, `list_registered_models`).
 - `tnbbeta_vae.training`: generic `Trainer` loop and local JSON/YAML
   `RunLogger` for train-run metadata.
+- `tnbbeta_vae.models.conv_vae.ConvTNBBetaSphericalVAE`: the first
+  trainable model -- a simple conv encoder/decoder with a
+  `TNBBetaSpherical` latent posterior/prior, registered as
+  `"conv_tnbbeta_spherical_vae"`.
+- `tnbbeta_vae.models.losses.monte_carlo_elbo`: a generic Monte Carlo
+  ELBO, averaged over `num_samples` reparameterized draws (works for any
+  reparameterizable distribution with tractable `log_prob`, not just
+  closed-form-KL families like Gaussian -- TNBBetaSpherical has no known
+  closed form for KL between distributions with different mean
+  directions, same as von Mises-Fisher).
+- `tnbbeta_vae.models.priors.FixedTNBBetaSphericalPrior`: a fixed,
+  non-learnable `TNBBetaSpherical` prior (mirrors the role of N(0, I) in
+  a vanilla VAE).
