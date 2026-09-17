@@ -41,3 +41,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `tnbbeta_vae.data.gaussian_blob_batch`: a synthetic dataset with known
   ground-truth generative factors (hue, position), for fast local
   experiments before touching real data.
+- `tnbbeta_vae.models.priors.uniform_prior_params(dim)`: returns
+  `(p, q, epsilon) = (0.5, 0, (dim-1)/2)`, the exact parameters making
+  `TNBBetaSpherical` reduce to `Uniform(S^(dim-1))` -- verified by
+  checking `log_prob` is constant across random points and independent
+  of `mean_direction`. Unlike a concentrated prior, matching this one
+  gives the encoder no cheap "collapse" target: a posterior that
+  collapsed toward it would itself have to become uniform (near-random
+  output regardless of `x`), a far worse reconstruction trade than
+  collapsing toward a concentrated prior's single point.
