@@ -29,14 +29,24 @@ automatically on commit, excluding `notebooks/`.
 ## Package structure notes
 
 - `src/tnbbeta_vae/distributions/`: probability distributions.
-  `TNBBetaUnivariate` is a finished, paper-sourced implementation.
-  `TNBBetaSpherical` is an intentional design stub (raises
-  `NotImplementedError`) -- the hyperspherical extension is original
-  research for this project, not in the source paper. Don't "complete" it
-  without discussing the mathematical construction first.
+  `TNBBetaUnivariate` is a finished, paper-sourced implementation
+  (closed-form `log_prob`, reparameterized `rsample`). `TNBBetaSpherical`
+  lifts it to the hypersphere via a Householder reflection -- original
+  research for this project, not in the source paper. Both are finished,
+  tested implementations; treat changes to either as touching validated
+  math, not a stub to fill in.
 - `src/tnbbeta_vae/registry.py`: models register via
   `@register_model(name, config_cls=SomePydanticConfig)`. New models
-  should follow this pattern rather than being wired up ad hoc.
+  should follow this pattern rather than being wired up ad hoc. Importing
+  `tnbbeta_vae.models` runs every model module's decorator (see that
+  package's `__init__.py`), so anything that needs the registry populated
+  (e.g. `apps/train/main.py`) must import `tnbbeta_vae.models`, not just
+  `tnbbeta_vae.registry`.
+- `src/tnbbeta_vae/models/`: `conv_vae.py`'s `ConvTNBBetaSphericalVAE` is
+  the first concrete model -- a simple conv encoder/decoder with a
+  `TNBBetaSpherical` posterior/prior, trained via
+  `models/losses/elbo.py`'s `monte_carlo_elbo` (a generic single-sample
+  MC ELBO, not a closed-form KL -- TNBBetaSpherical has none).
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
   `training_step`, not in `Trainer`.
@@ -44,6 +54,10 @@ automatically on commit, excluding `notebooks/`.
   code belongs in `src/tnbbeta_vae/`.
 - `notebooks/` is excluded from ruff/pyright/pre-commit -- don't hold it
   to the same style standard as `src/`.
+- Private (underscore-prefixed) helper functions/methods go after the
+  public API in their module/class, not before -- see
+  [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md#code-organization-private-helpers-go-at-the-bottom)
+  for the one exception (definitions referenced at class-definition time).
 
 ## Branch/PR policy
 
