@@ -57,3 +57,34 @@ class FixedTNBBetaSphericalPrior(nn.Module):
             A :class:`TNBBetaSpherical` with this module's parameters.
         """
         return TNBBetaSpherical(self.mean_direction, self.p, self.q, self.epsilon)
+
+
+def uniform_prior_params(dim: int) -> tuple[float, float, float]:
+    """Returns (p, q, epsilon) making TNBBetaSpherical exactly Uniform(S^(dim - 1)).
+
+    Derivation: the spherical density factors as ``f_W(w) /
+    [Area(S^(dim-2)) * (1-w^2)^((dim-3)/2)]`` (see this module's sibling
+    :mod:`tnbbeta_vae.distributions.tnbbeta_spherical`), so it's constant
+    in ``z`` iff ``f_W(w)`` is proportional to ``(1-w^2)^((dim-3)/2)``. At
+    ``q=0`` and ``p=0.5``, ``TNBBetaUnivariate(0.5, 0, eps)`` reduces to
+    plain ``Beta(eps, eps)`` (Corollary 3.1 of the source paper,
+    specialized to ``p=0.5`` so the LNbeta tilt parameter ``(1-p)/p``
+    equals 1), whose shifted density ``W = 2Y-1`` is proportional to
+    ``(1-w^2)^(eps-1)``. Matching exponents gives ``eps = (dim-1)/2``.
+    ``mean_direction`` becomes irrelevant at ``q=0`` -- there's no
+    directional concentration left to point anywhere.
+
+    Unlike a concentrated prior, matching this one gives an encoder no
+    cheap way to "collapse": since it has no informative direction, a
+    posterior that collapsed toward it would have to become uniform
+    itself -- i.e. produce near-random output regardless of ``x`` -- which
+    is a far worse reconstruction trade than collapsing toward a
+    concentrated prior's single point.
+
+    Args:
+        dim: Ambient dimension of the sphere S^(dim - 1).
+
+    Returns:
+        ``(p, q, epsilon) = (0.5, 0.0, (dim - 1) / 2)``.
+    """
+    return 0.5, 0.0, (dim - 1) / 2
