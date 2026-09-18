@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from tnbbeta_vae.distributions import TNBBetaSpherical
 
 __all__ = [
+    "gaussian_posterior_diagnostics",
     "random_tangent_direction",
     "sphere_geodesic_sweep",
     "tnbbeta_spherical_posterior_diagnostics",
@@ -71,6 +72,38 @@ def tnbbeta_spherical_posterior_diagnostics(
             off_diagonal
         ].mean()
 
+    return diagnostics
+
+
+def gaussian_posterior_diagnostics(mu: Tensor, sigma: Tensor) -> dict[str, Tensor]:
+    """Computes collapse-monitoring statistics for a diagonal Gaussian posterior.
+
+    The Gaussian-VAE counterpart to
+    :func:`tnbbeta_spherical_posterior_diagnostics`, used for baseline
+    comparisons. Classic posterior collapse looks like ``sigma -> 1`` and
+    ``mu`` becoming constant across examples (``KL -> 0``).
+
+    Args:
+        mu: Posterior means, shape ``(batch, latent_dim)``.
+        sigma: Posterior standard deviations, same shape.
+
+    Returns:
+        A dict of scalar tensors: min/mean/max of ``sigma``, and (when the
+        batch has more than one example) ``posterior_mu_std_mean`` -- the
+        across-batch std of each latent dim's ``mu``, averaged over dims --
+        and ``posterior_active_units``, the number of dims whose ``mu``
+        varies across the batch by more than 0.01 in variance (the
+        standard "active units" collapse metric).
+    """
+    diagnostics = {
+        "posterior_sigma_mean": sigma.mean(),
+        "posterior_sigma_min": sigma.min(),
+        "posterior_sigma_max": sigma.max(),
+    }
+    if mu.shape[0] > 1:
+        mu_variance = mu.var(dim=0)
+        diagnostics["posterior_mu_std_mean"] = mu_variance.sqrt().mean()
+        diagnostics["posterior_active_units"] = (mu_variance > 0.01).sum().float()
     return diagnostics
 
 

@@ -21,6 +21,11 @@ Note that a single-sample KL estimate (``log q(z) - log p(z)`` for one
 always >= 0 (Gibbs' inequality) -- only its *expectation* is guaranteed
 non-negative. Averaging over more samples (``num_samples``) reduces the
 estimator's variance but does not change this.
+
+Where a closed-form KL *does* exist (e.g. Gaussian vs. Gaussian), pass
+``analytic_kl=True`` to use ``torch.distributions.kl_divergence`` instead:
+it's exact, deterministic given the distributions, and always >= 0. The
+reconstruction term is still a Monte Carlo average either way.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from torch.distributions import Normal
+from torch.distributions import Normal, kl_divergence
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,6 +51,7 @@ def monte_carlo_elbo(
     decoder: Callable[[Tensor], Tensor],
     likelihood_scale: float = 1.0,
     num_samples: int = 1,
+    analytic_kl: bool = False,
 ) -> dict[str, Tensor]:
     """Computes a Monte Carlo ELBO for one batch, averaged over `num_samples` draws.
 
@@ -66,14 +72,22 @@ def monte_carlo_elbo(
             reconstruction likelihood.
         num_samples: Number of independent ``z ~ q(z|x)`` draws to average
             over. More samples lower the estimator's variance (including
-            the KL term's) at the cost of that many extra decoder calls.
+            the KL term's, when it's Monte Carlo) at the cost of that many
+            extra decoder calls.
+        analytic_kl: If True, compute the KL in closed form via
+            ``torch.distributions.kl_divergence(posterior, prior)`` instead
+            of estimating it from samples. Raises ``NotImplementedError``
+            for distribution pairs with no registered closed form (e.g.
+            any pair involving ``TNBBetaSpherical``).
 
     Returns:
         A dict with per-example (shape ``(batch,)``) tensors, each
         averaged over ``num_samples`` draws: ``"elbo"``,
-        ``"log_likelihood"``, and ``"kl"`` (the Monte Carlo KL estimate,
-        ``log q(z|x) - log p(z)``).
+        ``"log_likelihood"``, and ``"kl"`` (Monte Carlo ``log q(z|x) -
+        log p(z)``, or exact if ``analytic_kl``).
     """
+    exact_kl = kl_divergence(posterior, prior) if analytic_kl else None
+
     log_likelihoods = []
     kls = []
     for _ in range(num_samples):
@@ -82,10 +96,11 @@ def monte_carlo_elbo(
 
         log_likelihood = Normal(reconstruction, likelihood_scale).log_prob(x)
         log_likelihoods.append(log_likelihood.flatten(1).sum(-1))
-        kls.append(posterior.log_prob(z) - prior.log_prob(z))
+        if exact_kl is None:
+            kls.append(posterior.log_prob(z) - prior.log_prob(z))
 
     log_likelihood = torch.stack(log_likelihoods).mean(0)
-    kl = torch.stack(kls).mean(0)
+    kl = exact_kl if exact_kl is not None else torch.stack(kls).mean(0)
 
     return {
         "elbo": log_likelihood - kl,

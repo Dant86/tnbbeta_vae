@@ -54,7 +54,10 @@ automatically on commit, excluding `notebooks/`.
   `x`) -- `models/diagnostics.py`'s `tnbbeta_spherical_posterior_diagnostics`
   logs the statistics to watch for it, and `tnbbeta_vae.data.gaussian_blob_batch`
   is a synthetic dataset (known hue/position factors) for testing against
-  it locally before touching real data.
+  it locally before touching real data. `conv_gaussian_vae.py`'s
+  `ConvGaussianVAE` is a Gaussian baseline on the same encoder/decoder
+  (closed-form KL via `monte_carlo_elbo(..., analytic_kl=True)`) for
+  separating latent-family effects from architecture/data effects.
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
   `training_step`, not in `Trainer`.
