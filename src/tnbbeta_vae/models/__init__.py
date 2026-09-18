@@ -10,10 +10,16 @@ from tnbbeta_vae.models.conv_vae import (
     ConvTNBBetaSphericalVAE,
     ConvTNBBetaSphericalVAEConfig,
 )
-from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
+from tnbbeta_vae.models.diagnostics import (
+    random_tangent_direction,
+    sphere_geodesic_sweep,
+    tnbbeta_spherical_posterior_diagnostics,
+)
 
 __all__ = [
     "ConvTNBBetaSphericalVAE",
     "ConvTNBBetaSphericalVAEConfig",
+    "random_tangent_direction",
+    "sphere_geodesic_sweep",
     "tnbbeta_spherical_posterior_diagnostics",
 ]

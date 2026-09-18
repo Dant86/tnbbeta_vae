@@ -52,6 +52,16 @@ def test_decoder_rejects_image_size_not_divisible_by_eight() -> None:
         ConvDecoder(latent_dim=6, image_channels=3, image_size=30, hidden_channels=8)
 
 
+def test_encoder_rejects_hidden_channels_not_divisible_by_eight() -> None:
+    with pytest.raises(ValueError, match="GroupNorm"):
+        ConvEncoder(image_channels=3, image_size=32, hidden_channels=10)
+
+
+def test_decoder_rejects_hidden_channels_not_divisible_by_eight() -> None:
+    with pytest.raises(ValueError, match="GroupNorm"):
+        ConvDecoder(latent_dim=6, image_channels=3, image_size=32, hidden_channels=10)
+
+
 def test_encoder_decoder_round_trip_shapes_match_input() -> None:
     """Sanity check that encoder -> linear -> decoder recovers the input shape."""
     image_size = 32

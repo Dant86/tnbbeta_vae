@@ -50,3 +50,18 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   collapsed toward it would itself have to become uniform (near-random
   output regardless of `x`), a far worse reconstruction trade than
   collapsing toward a concentrated prior's single point.
+- `ConvEncoder`/`ConvDecoder` now have `GroupNorm` after every
+  conv/deconv/projection layer (except the final output). Motivated by a
+  geodesic sensitivity sweep (see below) showing the decoder swinging
+  output color wildly along *any* latent direction rather than some
+  dedicated "color" subspace -- a poorly-conditioned, entangled mapping
+  that left no safe direction for the encoder to route weakly-rewarded
+  information through without disturbing already-encoded information.
+  `hidden_channels` must now be divisible by 8.
+- `tnbbeta_vae.models.diagnostics.sphere_geodesic_sweep` and
+  `random_tangent_direction`: move a point along a true great-circle
+  geodesic at a controlled angular distance. Perturbing a single
+  Cartesian coordinate and renormalizing back onto the sphere is *not* a
+  fair way to compare sensitivity across directions -- the actual
+  angular distance moved for a fixed offset depends on how much that
+  coordinate already overlaps with the base point.

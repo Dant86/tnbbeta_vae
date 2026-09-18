@@ -1,4 +1,4 @@
-"""Posterior collapse diagnostics for `TNBBetaSpherical`-latent VAEs.
+"""Diagnostics for `TNBBetaSpherical`-latent VAEs: collapse and sphere geometry.
 
 In this parameterization, `p -> 0` combined with `q -> 1` is the
 distribution's expression of the classic VAE "KL vanishing" / posterior
@@ -26,7 +26,11 @@ if TYPE_CHECKING:
 
     from tnbbeta_vae.distributions import TNBBetaSpherical
 
-__all__ = ["tnbbeta_spherical_posterior_diagnostics"]
+__all__ = [
+    "random_tangent_direction",
+    "sphere_geodesic_sweep",
+    "tnbbeta_spherical_posterior_diagnostics",
+]
 
 
 def tnbbeta_spherical_posterior_diagnostics(
@@ -68,3 +72,48 @@ def tnbbeta_spherical_posterior_diagnostics(
         ].mean()
 
     return diagnostics
+
+
+def random_tangent_direction(base_point: Tensor) -> Tensor:
+    """Draws a uniformly random unit tangent vector at ``base_point``.
+
+    Args:
+        base_point: A unit vector, shape ``(..., dim)``.
+
+    Returns:
+        A unit vector orthogonal to ``base_point``, same shape.
+    """
+    raw = torch.randn_like(base_point)
+    tangent = raw - (raw * base_point).sum(-1, keepdim=True) * base_point
+    return tangent / tangent.norm(dim=-1, keepdim=True)
+
+
+def sphere_geodesic_sweep(
+    base_point: Tensor, tangent_direction: Tensor, angles: Tensor
+) -> Tensor:
+    """Moves ``base_point`` along a great circle toward ``tangent_direction``.
+
+    Perturbing a single Cartesian coordinate and renormalizing back onto
+    the sphere is *not* a fair way to compare "sensitivity" across
+    directions: the actual angular distance moved for a fixed offset
+    depends on how much that coordinate already overlaps with
+    ``base_point``. This instead moves by exactly ``angles`` radians along
+    a true geodesic, for any direction, so sensitivity comparisons across
+    different directions are apples-to-apples. Use
+    :func:`random_tangent_direction` to get a valid ``tangent_direction``
+    (must be a unit vector orthogonal to ``base_point``; not validated
+    here).
+
+    Args:
+        base_point: A unit vector, shape ``(..., dim)``.
+        tangent_direction: A unit vector orthogonal to ``base_point``,
+            same shape.
+        angles: Angular displacements in radians, shape ``(num_angles,)``.
+
+    Returns:
+        Points along the geodesic, shape ``(num_angles, ..., dim)``.
+    """
+    broadcast_shape = (-1, *([1] * base_point.dim()))
+    cos = angles.cos().reshape(broadcast_shape)
+    sin = angles.sin().reshape(broadcast_shape)
+    return cos * base_point + sin * tangent_direction
