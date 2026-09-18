@@ -65,3 +65,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fair way to compare sensitivity across directions -- the actual
   angular distance moved for a fixed offset depends on how much that
   coordinate already overlaps with the base point.
+
+### Fixed
+
+- Removed `ConvDecoder`'s `GroupNorm` on the initial dense
+  latent -> feature-map projection (`project_norm`). Normalizing there
+  measurably worsened collapse in a controlled experiment (posterior
+  concentration and directional collapse both increased, reconstruction
+  quality dropped) -- the narrowest point in the network, where a
+  handful of true degrees of freedom expand into a much larger feature
+  map, isn't a safe place for GroupNorm: its group statistics end up
+  nearly identical regardless of the specific input, washing out the
+  very z-dependence it needs to preserve. The conv/deconv layers' own
+  GroupNorms (operating on an already spatially-expanded representation)
+  are unaffected and stay.

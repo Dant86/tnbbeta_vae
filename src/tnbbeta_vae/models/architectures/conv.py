@@ -7,9 +7,9 @@ in (0, 1), ``epsilon`` > 0) is the caller's job (see
 module stays free of any distribution-specific logic and could equally
 well feed a different latent family.
 
-Every conv/deconv/projection layer (other than the final output) is
-followed by GroupNorm. Without it, a sweep along a single geodesic
-direction in latent space (see
+Every conv/deconv layer (other than the final output) is followed by
+GroupNorm. Without it, a sweep along a single geodesic direction in
+latent space (see
 :func:`tnbbeta_vae.models.diagnostics.sphere_geodesic_sweep`) showed the
 decoder swinging output color wildly for *any* direction, not some
 dedicated "color" subspace -- a hair-trigger, poorly-conditioned mapping
@@ -18,11 +18,22 @@ information (e.g. color) through without also disturbing whatever
 strongly-rewarded information (e.g. position) was already encoded there.
 GroupNorm (not BatchNorm) is used so behavior doesn't depend on batch
 size or differ between train/eval mode.
+
+Deliberately *not* normalized: the decoder's initial dense
+latent -> feature-map projection. An experiment normalizing it too made
+collapse measurably worse (posterior concentration and directional
+collapse both increased, reconstruction quality dropped) -- the
+suspected cause is that GroupNorm right at that projection, the
+narrowest point in the network (a handful of true degrees of freedom
+expanding into a much larger feature map), computes group statistics
+that end up nearly identical regardless of the specific input, washing
+out the very z-dependence it needs to preserve. Conv/deconv layers,
+operating on an already spatially-expanded representation, don't have
+this problem.
 """
 
 from __future__ import annotations
 
-import torch
 from torch import Tensor, nn
 
 __all__ = ["ConvDecoder", "ConvEncoder"]
@@ -130,11 +141,6 @@ class ConvDecoder(nn.Module):
         self.in_channels = hidden_channels * 4
 
         self.project = nn.Linear(latent_dim, self.in_channels * self.feature_size**2)
-        # Normalizes the projection's output before it fans out into the
-        # deconv stack -- this is the single dense layer through which
-        # every latent dimension mixes into every initial spatial/channel
-        # position, so it's the most direct point to condition.
-        self.project_norm = nn.GroupNorm(_NUM_GROUPS, self.in_channels)
         self.deconv = nn.Sequential(
             nn.ConvTranspose2d(
                 hidden_channels * 4, hidden_channels * 2, 4, stride=2, padding=1
@@ -165,6 +171,5 @@ class ConvDecoder(nn.Module):
         flat_features = features.reshape(
             -1, self.in_channels, self.feature_size, self.feature_size
         )
-        flat_features = torch.relu(self.project_norm(flat_features))
         reconstruction = self.deconv(flat_features)
         return reconstruction.reshape(*batch_shape, *reconstruction.shape[1:])
