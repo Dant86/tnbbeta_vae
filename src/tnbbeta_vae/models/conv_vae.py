@@ -18,6 +18,7 @@ from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
 from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
+from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.models.priors.tnbbeta_spherical import FixedTNBBetaSphericalPrior
 from tnbbeta_vae.registry import register_model
 
@@ -42,6 +43,9 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
         prior_epsilon: Fixed prior boundary parameter, > 0.
         likelihood_scale: Fixed standard deviation of the Gaussian
             reconstruction likelihood.
+            (The starting value when ``learn_likelihood_scale`` is set.)
+        learn_likelihood_scale: If True, ``likelihood_scale`` becomes a learned
+            shared scalar (parameterized by log sigma^2) instead of a fixed value.
         num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
             estimate. Higher values lower variance (there's no
             closed-form KL to fall back on here) at the cost of that many
@@ -56,6 +60,7 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     prior_q: float = 0.9
     prior_epsilon: float = 1.0
     likelihood_scale: float = 1.0
+    learn_likelihood_scale: bool = False
     num_elbo_samples: int = 1
 
 
@@ -83,6 +88,11 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             config.image_channels,
             config.image_size,
             config.hidden_channels,
+        )
+        self.learned_scale = (
+            LearnedLikelihoodScale(config.likelihood_scale)
+            if config.learn_likelihood_scale
+            else None
         )
         self.prior = FixedTNBBetaSphericalPrior(
             config.latent_dim, config.prior_p, config.prior_q, config.prior_epsilon
@@ -119,6 +129,7 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             :func:`tnbbeta_vae.models.diagnostics.tnbbeta_spherical_posterior_diagnostics`)
             for logging.
         """
+        scale = self._likelihood_scale()
         posterior = self._encode(batch)
         prior = self.prior()
         elbo_terms = monte_carlo_elbo(
@@ -126,13 +137,14 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             posterior,
             prior,
             self.decoder,
-            self.config.likelihood_scale,
+            scale,
             self.config.num_elbo_samples,
         )
         return {
             "loss": -elbo_terms["elbo"].mean(),
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
+            "likelihood_scale": torch.as_tensor(scale).detach(),
             **tnbbeta_spherical_posterior_diagnostics(posterior),
         }
 
@@ -164,3 +176,9 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
 
         return TNBBetaSpherical(mean_direction, p, q, epsilon)
+
+    def _likelihood_scale(self) -> float | Tensor:
+        """Returns the learned scale if enabled, else the configured constant."""
+        if self.learned_scale is None:
+            return self.config.likelihood_scale
+        return self.learned_scale()

@@ -95,7 +95,7 @@ the three paths at storage you own, then `mkdir -p slurm_logs`.
 sbatch scripts/slurm/download_cifar10.sbatch        # or run the download on the login node
 sbatch scripts/slurm/train.sbatch conv_vmf_vae vmf_s0.1_d32_seed0 \
     --set latent_dim=32 --set likelihood_scale=0.1 --epochs 50
-sbatch scripts/slurm/sweep.sbatch                   # 36-task array; edit the grid inside
+sbatch scripts/slurm/sweep.sbatch                   # 12-task array; edit the grid inside
 sbatch scripts/slurm/eval.sbatch vmf_s0.1_d32_seed0
 ```
 

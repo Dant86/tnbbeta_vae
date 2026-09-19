@@ -19,6 +19,7 @@ from tnbbeta_vae.distributions import HypersphericalUniform, VonMisesFisher
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
 from tnbbeta_vae.models.diagnostics import vmf_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
+from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
 
 __all__ = ["ConvVonMisesFisherVAE", "ConvVonMisesFisherVAEConfig"]
@@ -36,6 +37,9 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
             - 1); must be >= 3.
         likelihood_scale: Fixed standard deviation of the Gaussian
             reconstruction likelihood.
+            (The starting value when ``learn_likelihood_scale`` is set.)
+        learn_likelihood_scale: If True, ``likelihood_scale`` becomes a learned
+            shared scalar (parameterized by log sigma^2) instead of a fixed value.
         num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
             estimate (the KL is exact, so this only affects the
             likelihood term).
@@ -46,6 +50,7 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
     hidden_channels: int = 32
     latent_dim: int = 8
     likelihood_scale: float = 1.0
+    learn_likelihood_scale: bool = False
     num_elbo_samples: int = 1
 
 
@@ -76,6 +81,11 @@ class ConvVonMisesFisherVAE(nn.Module):
             config.image_channels,
             config.image_size,
             config.hidden_channels,
+        )
+        self.learned_scale = (
+            LearnedLikelihoodScale(config.likelihood_scale)
+            if config.learn_likelihood_scale
+            else None
         )
 
     def prior(self) -> HypersphericalUniform:
@@ -110,13 +120,14 @@ class ConvVonMisesFisherVAE(nn.Module):
             concentration diagnostics (see
             :func:`tnbbeta_vae.models.diagnostics.vmf_posterior_diagnostics`).
         """
+        scale = self._likelihood_scale()
         posterior = self._encode(batch)
         elbo_terms = monte_carlo_elbo(
             batch,
             posterior,
             self.prior(),
             self.decoder,
-            self.config.likelihood_scale,
+            scale,
             self.config.num_elbo_samples,
             analytic_kl=True,
         )
@@ -124,6 +135,7 @@ class ConvVonMisesFisherVAE(nn.Module):
             "loss": -elbo_terms["elbo"].mean(),
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
+            "likelihood_scale": torch.as_tensor(scale).detach(),
             **vmf_posterior_diagnostics(posterior),
         }
 
@@ -147,3 +159,9 @@ class ConvVonMisesFisherVAE(nn.Module):
         z_mean = z_mean / z_mean.norm(dim=-1, keepdim=True)
         z_var = nn.functional.softplus(self.fc_var(features)) + 1
         return VonMisesFisher(z_mean, z_var)
+
+    def _likelihood_scale(self) -> float | Tensor:
+        """Returns the learned scale if enabled, else the configured constant."""
+        if self.learned_scale is None:
+            return self.config.likelihood_scale
+        return self.learned_scale()

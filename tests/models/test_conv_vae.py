@@ -52,6 +52,7 @@ def test_training_step_returns_finite_loss_and_metrics() -> None:
         "loss",
         "log_likelihood",
         "kl",
+        "likelihood_scale",
         "posterior_p_mean",
         "posterior_p_min",
         "posterior_p_max",
