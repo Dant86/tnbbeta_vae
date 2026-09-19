@@ -46,6 +46,11 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
             (The starting value when ``learn_likelihood_scale`` is set.)
         learn_likelihood_scale: If True, ``likelihood_scale`` becomes a learned
             shared scalar (parameterized by log sigma^2) instead of a fixed value.
+        param_clamp: The posterior's p and q are clamped to ``[param_clamp,
+            1 - param_clamp]``. A clamped value passes no gradient, so p or q
+            sitting exactly on the boundary means the model wants more extreme
+            values than allowed. The floor of what float32 can resolve near
+            1 is about 1e-7.
         num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
             estimate. Higher values lower variance (there's no
             closed-form KL to fall back on here) at the cost of that many
@@ -61,6 +66,7 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     prior_epsilon: float = 1.0
     likelihood_scale: float = 1.0
     learn_likelihood_scale: bool = False
+    param_clamp: float = _PARAM_EPS
     num_elbo_samples: int = 1
 
 
@@ -171,8 +177,9 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         mean_direction = raw_direction / raw_direction.norm(
             dim=-1, keepdim=True
         ).clamp_min(_PARAM_EPS)
-        p = torch.sigmoid(raw_p.squeeze(-1)).clamp(_PARAM_EPS, 1 - _PARAM_EPS)
-        q = torch.sigmoid(raw_q.squeeze(-1)).clamp(_PARAM_EPS, 1 - _PARAM_EPS)
+        bound = self.config.param_clamp
+        p = torch.sigmoid(raw_p.squeeze(-1)).clamp(bound, 1 - bound)
+        q = torch.sigmoid(raw_q.squeeze(-1)).clamp(bound, 1 - bound)
         epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
 
         return TNBBetaSpherical(mean_direction, p, q, epsilon)

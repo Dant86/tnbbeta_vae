@@ -189,3 +189,16 @@ def test_generate_returns_valid_images() -> None:
 
     assert images.shape == (5, 3, 32, 32)
     assert images.min() >= 0 and images.max() <= 1
+
+
+def test_param_clamp_bounds_p_and_q() -> None:
+    model = ConvTNBBetaSphericalVAE(
+        ConvTNBBetaSphericalVAEConfig(latent_dim=4, hidden_channels=8, param_clamp=1e-3)
+    )
+    with torch.no_grad():
+        model.posterior_head.bias[-3:-1] = torch.tensor([50.0, -50.0])  # p -> 1, q -> 0
+
+        posterior = model._encode(torch.rand(3, 3, 32, 32))
+
+    assert torch.allclose(posterior.p, torch.full((3,), 1 - 1e-3), atol=1e-6)
+    assert torch.allclose(posterior.q, torch.full((3,), 1e-3), atol=1e-6)
