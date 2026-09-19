@@ -49,7 +49,7 @@ def monte_carlo_elbo(
     posterior: Distribution,
     prior: Distribution,
     decoder: Callable[[Tensor], Tensor],
-    likelihood_scale: float = 1.0,
+    likelihood_scale: float | Tensor = 1.0,
     num_samples: int = 1,
     analytic_kl: bool = False,
 ) -> dict[str, Tensor]:
@@ -68,8 +68,8 @@ def monte_carlo_elbo(
         decoder: Maps a latent sample (shape ``(batch,
             *posterior.event_shape)``) to a reconstruction, same shape as
             ``x``.
-        likelihood_scale: Fixed standard deviation of the Gaussian
-            reconstruction likelihood.
+        likelihood_scale: Standard deviation of the Gaussian reconstruction
+            likelihood. A tensor (e.g. a learned scale) receives gradients.
         num_samples: Number of independent ``z ~ q(z|x)`` draws to average
             over. More samples lower the estimator's variance (including
             the KL term's, when it's Monte Carlo) at the cost of that many
