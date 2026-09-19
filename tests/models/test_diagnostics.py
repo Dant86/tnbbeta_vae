@@ -8,6 +8,7 @@ import torch
 
 from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.diagnostics import (
+    gaussian_posterior_diagnostics,
     random_tangent_direction,
     sphere_geodesic_sweep,
     tnbbeta_spherical_posterior_diagnostics,
@@ -128,6 +129,38 @@ def test_geodesic_sweep_angular_distance_matches_angle() -> None:
     traveled = torch.acos(cosine_to_base)
 
     assert torch.allclose(traveled, angles, atol=1e-5)
+
+
+def test_gaussian_diagnostics_flag_a_collapsed_posterior() -> None:
+    """mu constant across the batch and sigma=1 is the classic collapse."""
+    mu = torch.zeros(32, 8)
+    sigma = torch.ones(32, 8)
+
+    diagnostics = gaussian_posterior_diagnostics(mu, sigma)
+
+    assert diagnostics["posterior_active_units"] == 0
+    assert diagnostics["posterior_mu_std_mean"] == 0
+    assert diagnostics["posterior_sigma_mean"] == 1
+
+
+def test_gaussian_diagnostics_count_active_units() -> None:
+    torch.manual_seed(3)
+    mu = torch.zeros(256, 6)
+    mu[:, :2] = torch.randn(256, 2)  # only the first two dims vary across x
+    sigma = torch.full((256, 6), 0.5)
+
+    diagnostics = gaussian_posterior_diagnostics(mu, sigma)
+
+    assert diagnostics["posterior_active_units"] == 2
+    assert diagnostics["posterior_sigma_min"] == diagnostics["posterior_sigma_max"]
+
+
+def test_gaussian_diagnostics_omit_batch_stats_for_batch_size_one() -> None:
+    diagnostics = gaussian_posterior_diagnostics(torch.zeros(1, 4), torch.ones(1, 4))
+
+    assert "posterior_active_units" not in diagnostics
+    assert "posterior_mu_std_mean" not in diagnostics
+    assert "posterior_sigma_mean" in diagnostics
 
 
 def _random_posterior(batch_size: int, dim: int) -> TNBBetaSpherical:

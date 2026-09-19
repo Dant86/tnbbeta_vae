@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from torch import nn
+from torch.distributions import Independent, Normal
 
 from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
@@ -98,6 +100,80 @@ def test_num_samples_matches_manual_average() -> None:
 
     for key, expected in manual_mean.items():
         assert torch.allclose(multi_sample_terms[key], expected, atol=1e-5)
+
+
+def test_analytic_kl_matches_closed_form_gaussian_formula() -> None:
+    """KL(N(mu, s^2) || N(0, 1)) = 0.5 * sum(mu^2 + s^2 - 1 - log s^2)."""
+    torch.manual_seed(6)
+    posterior, prior, mu, sigma = _gaussian_posterior_and_prior(batch_size=5, dim=4)
+    x = torch.rand(5, 3, 8, 8)
+    decoder = nn.Linear(4, 3 * 8 * 8)
+
+    def decode(z: torch.Tensor) -> torch.Tensor:
+        return decoder(z).reshape(z.shape[0], 3, 8, 8)
+
+    terms = monte_carlo_elbo(x, posterior, prior, decode, analytic_kl=True)
+
+    expected = 0.5 * (mu**2 + sigma**2 - 1 - 2 * sigma.log()).sum(-1)
+    assert torch.allclose(terms["kl"], expected, atol=1e-5)
+    assert torch.allclose(terms["elbo"], terms["log_likelihood"] - terms["kl"])
+
+
+def test_analytic_kl_is_deterministic_and_nonnegative() -> None:
+    """Unlike the MC estimate, exact KL doesn't depend on which z was drawn."""
+    posterior, prior, _, _ = _gaussian_posterior_and_prior(batch_size=6, dim=4)
+    x = torch.rand(6, 3, 8, 8)
+
+    def decode(z: torch.Tensor) -> torch.Tensor:
+        return torch.zeros(z.shape[0], 3, 8, 8)
+
+    torch.manual_seed(0)
+    first = monte_carlo_elbo(x, posterior, prior, decode, analytic_kl=True)
+    torch.manual_seed(1)
+    second = monte_carlo_elbo(x, posterior, prior, decode, analytic_kl=True)
+
+    assert torch.equal(first["kl"], second["kl"])
+    assert (first["kl"] >= 0).all()
+
+
+def test_analytic_kl_agrees_with_monte_carlo_kl_in_expectation() -> None:
+    """Sanity check that the two KL paths estimate the same quantity."""
+    torch.manual_seed(7)
+    posterior, prior, _, _ = _gaussian_posterior_and_prior(batch_size=3, dim=4)
+    x = torch.rand(3, 3, 8, 8)
+
+    def decode(z: torch.Tensor) -> torch.Tensor:
+        return torch.zeros(z.shape[0], 3, 8, 8)
+
+    exact = monte_carlo_elbo(x, posterior, prior, decode, analytic_kl=True)["kl"]
+    mc = monte_carlo_elbo(x, posterior, prior, decode, num_samples=20_000)["kl"]
+
+    assert torch.allclose(exact, mc, atol=0.05)
+
+
+def test_analytic_kl_raises_for_pairs_without_a_closed_form() -> None:
+    """TNBBetaSpherical has no registered KL -- fail loudly, don't silently MC."""
+    posterior, prior = _make_posterior_and_prior(batch_size=3, dim=4)
+    x = torch.rand(3, 3, 8, 8)
+
+    with pytest.raises(NotImplementedError):
+        monte_carlo_elbo(
+            x,
+            posterior,
+            prior,
+            decoder=lambda z: torch.zeros(z.shape[0], 3, 8, 8),
+            analytic_kl=True,
+        )
+
+
+def _gaussian_posterior_and_prior(
+    batch_size: int, dim: int
+) -> tuple[Independent, Independent, torch.Tensor, torch.Tensor]:
+    mu = torch.randn(batch_size, dim)
+    sigma = torch.rand(batch_size, dim) * 1.5 + 0.2
+    posterior = Independent(Normal(mu, sigma), 1)
+    prior = Independent(Normal(torch.zeros_like(mu), torch.ones_like(sigma)), 1)
+    return posterior, prior, mu, sigma
 
 
 def _canonical_prior(dim: int) -> TNBBetaSpherical:
