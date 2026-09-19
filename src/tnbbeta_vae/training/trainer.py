@@ -7,18 +7,22 @@ lives on the model via the ``training_step`` protocol below, not here.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 
 from tnbbeta_vae.training.run_logging import RunLogger
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping
 
     from pydantic import BaseModel
 
 __all__ = ["Trainer", "TrainableModel"]
+
+_DEFAULT_RUNS_DIR = Path("runs")
 
 
 class TrainableModel[BatchT](Protocol):
@@ -37,6 +41,14 @@ class TrainableModel[BatchT](Protocol):
         """Runs one training step and returns a dict including a "loss" key."""
         ...
 
+    def state_dict(self) -> dict[str, Any]:
+        """Returns the model's parameters (see ``torch.nn.Module.state_dict``)."""
+        ...
+
+    def load_state_dict(self, state_dict: Mapping[str, Any]) -> object:
+        """Loads parameters (see ``torch.nn.Module.load_state_dict``)."""
+        ...
+
 
 class Trainer[BatchT]:
     """Runs a model-agnostic epoch loop over a dataloader, logging metrics."""
@@ -47,6 +59,8 @@ class Trainer[BatchT]:
         optimizer: torch.optim.Optimizer,
         model_name: str,
         config: BaseModel,
+        runs_dir: Path = _DEFAULT_RUNS_DIR,
+        run_id: str | None = None,
     ) -> None:
         """Initializes the trainer and starts a new run log.
 
@@ -55,22 +69,41 @@ class Trainer[BatchT]:
             optimizer: Optimizer over ``model``'s parameters.
             model_name: Registry name of ``model``, for run metadata.
             config: The run's config, recorded verbatim in the run log.
+            runs_dir: Parent directory for the run's log directory.
+            run_id: Run identifier; pass a fixed value to resume a run
+                into the same log directory. Defaults to a fresh id.
         """
         self.model = model
         self.optimizer = optimizer
-        self.run_logger = RunLogger(model_name=model_name, config=config)
+        self.model_name = model_name
+        self.config = config
+        self.run_logger = RunLogger(
+            model_name=model_name, config=config, runs_dir=runs_dir, run_id=run_id
+        )
+        self.step = 0
+        self.epochs_completed = 0
 
-    def fit(self, dataloader: Iterable[BatchT], num_epochs: int) -> None:
-        """Trains for ``num_epochs`` passes over ``dataloader``.
+    def fit(
+        self,
+        dataloader: Iterable[BatchT],
+        num_epochs: int,
+        checkpoint_dir: Path | None = None,
+    ) -> None:
+        """Trains until ``num_epochs`` epochs are complete.
+
+        Continues from ``self.epochs_completed`` (nonzero after
+        :meth:`load_checkpoint`), so a resumed run only does the remaining
+        epochs.
 
         Args:
             dataloader: Iterable of batches, each passed to the model's
-                ``training_step``.
-            num_epochs: Number of passes over ``dataloader``.
+                ``training_step``. Must be re-iterable once per epoch.
+            num_epochs: Total number of epochs to have completed at the end.
+            checkpoint_dir: If given, ``latest.pt`` is rewritten after every
+                epoch and ``final.pt`` once training completes.
         """
-        step = 0
         self.model.train()
-        for epoch in range(num_epochs):
+        for epoch in range(self.epochs_completed, num_epochs):
             for batch in dataloader:
                 self.optimizer.zero_grad()
                 outputs = self.model.training_step(batch)
@@ -78,7 +111,49 @@ class Trainer[BatchT]:
                 self.optimizer.step()
 
                 metrics = {k: v.item() for k, v in outputs.items()}
-                self.run_logger.log_metrics(step=step, metrics=metrics)
-                step += 1
-            self.run_logger.log_metrics(step=step, metrics={"epoch": epoch})
+                self.run_logger.log_metrics(step=self.step, metrics=metrics)
+                self.step += 1
+            self.epochs_completed = epoch + 1
+            self.run_logger.log_metrics(step=self.step, metrics={"epoch": epoch})
+            if checkpoint_dir is not None:
+                self.save_checkpoint(checkpoint_dir / "latest.pt")
+        if checkpoint_dir is not None:
+            self.save_checkpoint(checkpoint_dir / "final.pt")
         self.run_logger.close()
+
+    def save_checkpoint(self, path: Path) -> None:
+        """Atomically writes a checkpoint (model, optimizer, progress, config).
+
+        Written to a temporary file and renamed, so a job killed mid-write
+        never leaves a truncated checkpoint behind.
+
+        Args:
+            path: Destination file; parent directories are created.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp")
+        torch.save(
+            {
+                "model_name": self.model_name,
+                "config": self.config.model_dump(),
+                "run_id": self.run_logger.run_id,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "epochs_completed": self.epochs_completed,
+                "step": self.step,
+            },
+            temporary,
+        )
+        os.replace(temporary, path)
+
+    def load_checkpoint(self, path: Path) -> None:
+        """Restores model, optimizer and progress from a checkpoint.
+
+        Args:
+            path: A file written by :meth:`save_checkpoint`.
+        """
+        checkpoint = torch.load(path, weights_only=True)
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        self.epochs_completed = checkpoint["epochs_completed"]
+        self.step = checkpoint["step"]

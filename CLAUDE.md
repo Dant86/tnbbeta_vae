@@ -58,9 +58,18 @@ automatically on commit, excluding `notebooks/`.
   `ConvGaussianVAE` is a Gaussian baseline on the same encoder/decoder
   (closed-form KL via `monte_carlo_elbo(..., analytic_kl=True)`) for
   separating latent-family effects from architecture/data effects.
+  `conv_vmf_vae.py`'s `ConvVonMisesFisherVAE` is a hyperspherical
+  baseline using a port of the original S-VAE vMF (Wood rejection
+  sampler, Bessel-function KL via `scipy`); keep it faithful to that
+  reference rather than "improving" it, since it is the comparison point.
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
-  `training_step`, not in `Trainer`.
+  `training_step`, not in `Trainer`. It also writes/reads checkpoints
+  (`latest.pt`, `final.pt`) so preempted cluster jobs can resume.
+- `src/tnbbeta_vae/paths.py`: data/checkpoint/runs directories come from
+  `.env` (see `.env.sample`); never hard-code paths in scripts.
+- `scripts/slurm/`: `sbatch` scripts for the UChicago DSI cluster (see the
+  README); they call `apps/train`, `apps/eval` and `apps/data`.
 - `apps/` holds CLI scripts (not part of the installed package); library
   code belongs in `src/tnbbeta_vae/`.
 - `notebooks/` is excluded from ruff/pyright/pre-commit -- don't hold it

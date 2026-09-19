@@ -24,13 +24,14 @@ import torch
 if TYPE_CHECKING:
     from torch import Tensor
 
-    from tnbbeta_vae.distributions import TNBBetaSpherical
+    from tnbbeta_vae.distributions import TNBBetaSpherical, VonMisesFisher
 
 __all__ = [
     "gaussian_posterior_diagnostics",
     "random_tangent_direction",
     "sphere_geodesic_sweep",
     "tnbbeta_spherical_posterior_diagnostics",
+    "vmf_posterior_diagnostics",
 ]
 
 
@@ -105,6 +106,25 @@ def gaussian_posterior_diagnostics(mu: Tensor, sigma: Tensor) -> dict[str, Tenso
         diagnostics["posterior_mu_std_mean"] = mu_variance.sqrt().mean()
         diagnostics["posterior_active_units"] = (mu_variance > 0.01).sum().float()
     return diagnostics
+
+
+def vmf_posterior_diagnostics(posterior: VonMisesFisher) -> dict[str, Tensor]:
+    """Computes concentration statistics for a von Mises-Fisher posterior.
+
+    Args:
+        posterior: A batched ``VonMisesFisher`` posterior.
+
+    Returns:
+        A dict of scalar tensors: min/mean/max of ``kappa``. ``kappa -> 0``
+        everywhere is the collapse mode (the posterior equals the uniform
+        prior).
+    """
+    kappa = posterior.scale.detach()
+    return {
+        "posterior_kappa_mean": kappa.mean(),
+        "posterior_kappa_min": kappa.min(),
+        "posterior_kappa_max": kappa.max(),
+    }
 
 
 def random_tangent_direction(base_point: Tensor) -> Tensor:

@@ -113,3 +113,8 @@ writeup/**/*.lot
 writeup/**/*.idx
 writeup/**/*.ilg
 writeup/**/*.ind
+
+# Data, checkpoints and SLURM logs (repo-root only, so src/tnbbeta_vae/data is unaffected).
+/data/
+/checkpoints/
+/slurm_logs/

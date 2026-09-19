@@ -136,6 +136,19 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             **tnbbeta_spherical_posterior_diagnostics(posterior),
         }
 
+    @torch.no_grad()
+    def generate(self, num_samples: int) -> Tensor:
+        """Decodes ``num_samples`` draws from the model's fixed prior.
+
+        Args:
+            num_samples: Number of images to generate.
+
+        Returns:
+            Images of shape ``(num_samples, image_channels, image_size,
+            image_size)``.
+        """
+        return self.decoder(self.prior().sample(torch.Size([num_samples])))
+
     def _encode(self, x: Tensor) -> TNBBetaSpherical:
         """Maps images to a per-example TNBBetaSpherical posterior."""
         features = self.encoder(x)

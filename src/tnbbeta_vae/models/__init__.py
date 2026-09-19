@@ -11,11 +11,16 @@ from tnbbeta_vae.models.conv_vae import (
     ConvTNBBetaSphericalVAE,
     ConvTNBBetaSphericalVAEConfig,
 )
+from tnbbeta_vae.models.conv_vmf_vae import (
+    ConvVonMisesFisherVAE,
+    ConvVonMisesFisherVAEConfig,
+)
 from tnbbeta_vae.models.diagnostics import (
     gaussian_posterior_diagnostics,
     random_tangent_direction,
     sphere_geodesic_sweep,
     tnbbeta_spherical_posterior_diagnostics,
+    vmf_posterior_diagnostics,
 )
 
 __all__ = [
@@ -23,8 +28,11 @@ __all__ = [
     "ConvGaussianVAEConfig",
     "ConvTNBBetaSphericalVAE",
     "ConvTNBBetaSphericalVAEConfig",
+    "ConvVonMisesFisherVAE",
+    "ConvVonMisesFisherVAEConfig",
     "gaussian_posterior_diagnostics",
     "random_tangent_direction",
     "sphere_geodesic_sweep",
     "tnbbeta_spherical_posterior_diagnostics",
+    "vmf_posterior_diagnostics",
 ]

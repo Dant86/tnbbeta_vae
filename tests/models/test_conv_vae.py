@@ -181,3 +181,10 @@ def test_trainer_runs_end_to_end_on_gaussian_blob_batches(
 def _small_model() -> ConvTNBBetaSphericalVAE:
     config = ConvTNBBetaSphericalVAEConfig(latent_dim=4, hidden_channels=8)
     return ConvTNBBetaSphericalVAE(config)
+
+
+def test_generate_returns_valid_images() -> None:
+    images = _small_model().generate(5)
+
+    assert images.shape == (5, 3, 32, 32)
+    assert images.min() >= 0 and images.max() <= 1

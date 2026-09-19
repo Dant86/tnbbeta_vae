@@ -7,6 +7,18 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- CIFAR-10 workflow: `tnbbeta_vae.data.load_cifar10` (torchvision),
+  `apps/data/download_cifar10.py`, a working `apps/train/main.py`
+  (checkpointing, `--resume`, `--uniform-prior`), `apps/eval/main.py`
+  (ELBO, KL, MSE/PSNR, prior-sample nearest-neighbour score, sample
+  images), `Trainer.save_checkpoint`/`load_checkpoint`,
+  `tnbbeta_vae.paths` (`.env`-configured data/checkpoint/runs
+  directories, see `.env.sample`), a `generate()` method on every model,
+  and `sbatch` scripts under `scripts/slurm/` for the UChicago DSI cluster.
+- `tnbbeta_vae.distributions.VonMisesFisher` and `HypersphericalUniform`,
+  ported from the S-VAE reference implementation (Davidson et al., 2018),
+  and `ConvVonMisesFisherVAE` (`"conv_vmf_vae"`) as a hyperspherical
+  baseline with analytic KL.
 - Project scaffolding: `uv`-managed package, ruff + pyright + pre-commit,
   GitHub Actions CI, branch protection.
 - `tnbbeta_vae.distributions.TNBBetaUnivariate`: the univariate TNBbeta
