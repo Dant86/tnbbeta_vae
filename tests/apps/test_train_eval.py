@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 
+from apps.eval import export_latents
 from apps.eval import main as eval_main
 from apps.train import main as train_main
 from tnbbeta_vae.data.cifar10 import Cifar10Images
@@ -22,7 +24,7 @@ _MODELS = [
 def _fake_dataset(*_args: object, train: bool, **_kwargs: object) -> Cifar10Images:
     generator = torch.Generator().manual_seed(0 if train else 1)
     return Cifar10Images(
-        [(torch.rand(3, 32, 32, generator=generator), 0) for _ in range(8)]
+        [(torch.rand(3, 32, 32, generator=generator), i % 3) for i in range(8)]
     )
 
 
@@ -34,6 +36,7 @@ def _isolated_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TNBBETA_RUNS_DIR", str(tmp_path / "runs"))
     monkeypatch.setattr(train_main, "load_cifar10", _fake_dataset)
     monkeypatch.setattr(eval_main, "load_cifar10", _fake_dataset)
+    monkeypatch.setattr(export_latents, "load_cifar10", _fake_dataset)
 
 
 def _train_args(model: str, extra: list[str], epochs: int) -> list[str]:
@@ -98,3 +101,56 @@ def test_resume_skips_completed_and_continues_partial(
 def test_uniform_prior_rejected_for_non_tnbbeta_models() -> None:
     with pytest.raises(SystemExit):
         train_main.main(_train_args("conv_gaussian_vae", ["--uniform-prior"], epochs=1))
+
+
+def test_select_device_refuses_a_silent_cpu_fallback_under_slurm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setenv("SLURM_JOB_GPUS", "0")
+
+    with pytest.raises(SystemExit, match="refusing"):
+        train_main._select_device(None)
+    assert train_main._select_device("cpu").type == "cpu"
+
+
+def test_select_device_uses_cpu_when_no_gpu_was_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    for name in train_main._SLURM_GPU_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+
+    assert train_main._select_device(None).type == "cpu"
+
+
+@pytest.mark.parametrize(("model", "extra"), _MODELS)
+def test_export_latents_writes_parameters_labels_and_probe(
+    model: str, extra: list[str], tmp_path: Path
+) -> None:
+    train_main.main(_train_args(model, extra, epochs=1))
+
+    export_latents.main(
+        [
+            "--run-name",
+            "smoke",
+            "--num-workers",
+            "0",
+            "--device",
+            "cpu",
+            "--batch-size",
+            "4",
+        ]
+    )
+
+    run_checkpoints = tmp_path / "ckpt" / "smoke"
+    latents = np.load(run_checkpoints / "latents_final_test.npz")
+    assert latents["labels"].tolist() == [i % 3 for i in range(8)]
+    for key in ("direction", "z", "kl"):
+        assert len(latents[key]) == 8
+    is_tnbbeta = model == "conv_tnbbeta_spherical_vae"
+    assert ("concentration" in latents.files) != is_tnbbeta
+    assert latents["direction"].shape[1] == 4
+    assert ("p" in latents.files) == is_tnbbeta
+    probe = json.loads((run_checkpoints / "latent_probe_final_test.json").read_text())
+    assert set(probe) >= {"direction", "z_sample"}

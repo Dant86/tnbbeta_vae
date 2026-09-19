@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from typing import TYPE_CHECKING, cast
 
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from torch import Tensor
+
+_SLURM_GPU_VARIABLES = ("SLURM_JOB_GPUS", "SLURM_GPUS_ON_NODE", "SLURM_STEP_GPUS")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -104,9 +107,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     torch.manual_seed(args.seed)
-    device = torch.device(
-        args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    device = _select_device(args.device)
     model = cast("nn.Module", build_model(args.model, **overrides)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     trainer = Trainer(
@@ -148,6 +149,36 @@ class _OnDevice:
     def __iter__(self) -> Iterator[Tensor]:
         for batch in self._loader:
             yield batch.to(self._device, non_blocking=True)
+
+
+def _select_device(requested: str | None) -> torch.device:
+    """Picks the training device, refusing a silent CPU fallback under Slurm.
+
+    If a GPU was allocated to the job but CUDA can't initialize (a node
+    problem), PyTorch quietly falls back to the CPU and the run crawls.
+    Failing here makes that visible immediately. An explicit ``--device``
+    is always honored.
+
+    Args:
+        requested: The ``--device`` argument, or ``None`` to choose.
+
+    Returns:
+        The device to train on.
+
+    Raises:
+        SystemExit: If a Slurm GPU was allocated but CUDA is unavailable.
+    """
+    if requested is not None:
+        return torch.device(requested)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if any(os.environ.get(name) for name in _SLURM_GPU_VARIABLES):
+        raise SystemExit(
+            "Slurm allocated a GPU but CUDA is unavailable on this node; refusing "
+            "to fall back to the CPU. Resubmit, excluding this node (sbatch "
+            "--exclude=<node>), or pass --device cpu to train on the CPU anyway."
+        )
+    return torch.device("cpu")
 
 
 def _parse_overrides(pairs: list[str]) -> dict[str, str]:
