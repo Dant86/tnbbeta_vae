@@ -65,3 +65,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fair way to compare sensitivity across directions -- the actual
   angular distance moved for a fixed offset depends on how much that
   coordinate already overlaps with the base point.
+- `tnbbeta_vae.models.conv_gaussian_vae.ConvGaussianVAE` (registered as
+  `"conv_gaussian_vae"`): a standard diagonal-Gaussian VAE on the same
+  `ConvEncoder`/`ConvDecoder`, N(0, I) prior, closed-form KL. A baseline for
+  separating "is it the TNBBetaSpherical latent?" from "is it the
+  architecture/data/optimization/likelihood?".
+- `monte_carlo_elbo(..., analytic_kl=True)`: use
+  `torch.distributions.kl_divergence` (exact, deterministic, always >= 0)
+  instead of a Monte Carlo KL estimate where a closed form exists. Raises
+  `NotImplementedError` for pairs without one (e.g. anything involving
+  `TNBBetaSpherical`) rather than silently falling back.
+- `gaussian_posterior_diagnostics`: Gaussian counterpart to the spherical
+  collapse diagnostics (sigma stats, across-batch mu std, active units).

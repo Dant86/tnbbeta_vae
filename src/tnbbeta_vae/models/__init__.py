@@ -6,19 +6,24 @@ model module's ``@register_model`` decorator runs on import), so
 ``import tnbbeta_vae.models``.
 """
 
+from tnbbeta_vae.models.conv_gaussian_vae import ConvGaussianVAE, ConvGaussianVAEConfig
 from tnbbeta_vae.models.conv_vae import (
     ConvTNBBetaSphericalVAE,
     ConvTNBBetaSphericalVAEConfig,
 )
 from tnbbeta_vae.models.diagnostics import (
+    gaussian_posterior_diagnostics,
     random_tangent_direction,
     sphere_geodesic_sweep,
     tnbbeta_spherical_posterior_diagnostics,
 )
 
 __all__ = [
+    "ConvGaussianVAE",
+    "ConvGaussianVAEConfig",
     "ConvTNBBetaSphericalVAE",
     "ConvTNBBetaSphericalVAEConfig",
+    "gaussian_posterior_diagnostics",
     "random_tangent_direction",
     "sphere_geodesic_sweep",
     "tnbbeta_spherical_posterior_diagnostics",
