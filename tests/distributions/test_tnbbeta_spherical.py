@@ -17,6 +17,22 @@ def test_rejects_dim_less_than_two() -> None:
         TNBBetaSpherical(mean_direction=torch.tensor([1.0]), p=0.5, q=0.5, epsilon=1.0)
 
 
+def test_float_parameters_follow_the_mean_directions_device() -> None:
+    """Float p/q/epsilon must not stay on the CPU when mean_direction is elsewhere.
+
+    Uses the ``meta`` device as a stand-in for CUDA, so this runs without a GPU.
+    """
+    mean_direction = torch.empty(3, device="meta")
+
+    dist = TNBBetaSpherical(
+        mean_direction, p=0.5, q=0.0, epsilon=1.0, validate_args=False
+    )
+
+    assert dist.p.device.type == "meta"
+    assert dist.q.device.type == "meta"
+    assert dist.epsilon.device.type == "meta"
+
+
 def test_normalizes_mean_direction() -> None:
     """A non-unit mean_direction is normalized, not rejected."""
     dist = TNBBetaSpherical(
