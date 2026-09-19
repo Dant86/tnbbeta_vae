@@ -123,6 +123,26 @@ class ConvGaussianVAE(nn.Module):
             **gaussian_posterior_diagnostics(mu, sigma),
         }
 
+    @torch.no_grad()
+    def generate(self, num_samples: int) -> Tensor:
+        """Decodes ``num_samples`` draws from the N(0, I) prior.
+
+        Args:
+            num_samples: Number of images to generate.
+
+        Returns:
+            Images of shape ``(num_samples, image_channels, image_size,
+            image_size)``.
+        """
+        weight = self.posterior_head.weight
+        z = torch.randn(
+            num_samples,
+            self.config.latent_dim,
+            device=weight.device,
+            dtype=weight.dtype,
+        )
+        return self.decoder(z)
+
     def _encode(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Maps images to per-example posterior means and standard deviations."""
         mu, log_var = self.posterior_head(self.encoder(x)).chunk(2, dim=-1)
