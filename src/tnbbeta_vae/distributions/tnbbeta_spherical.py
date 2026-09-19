@@ -121,7 +121,10 @@ class TNBBetaSpherical(Distribution):
             )
         self.mean_direction = mean_direction / mean_direction.norm(dim=-1, keepdim=True)
 
-        p_t, q_t, epsilon_t = broadcast_all(p, q, epsilon)
+        # Float parameters become CPU tensors; keep them with the mean direction.
+        p_t, q_t, epsilon_t = (
+            t.to(self.mean_direction.device) for t in broadcast_all(p, q, epsilon)
+        )
         batch_shape = torch.broadcast_shapes(self.mean_direction.shape[:-1], p_t.shape)
         self.p = p_t.expand(batch_shape)
         self.q = q_t.expand(batch_shape)
