@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 _SLURM_GPU_VARIABLES = ("SLURM_JOB_GPUS", "SLURM_GPUS_ON_NODE", "SLURM_STEP_GPUS")
+# EX_TEMPFAIL: scripts/slurm/train.sbatch resubmits the job on this exit code.
+NO_GPU_EXIT_CODE = 75
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -166,18 +168,21 @@ def _select_device(requested: str | None) -> torch.device:
         The device to train on.
 
     Raises:
-        SystemExit: If a Slurm GPU was allocated but CUDA is unavailable.
+        SystemExit: With ``NO_GPU_EXIT_CODE`` if a Slurm GPU was allocated but
+            CUDA is unavailable.
     """
     if requested is not None:
         return torch.device(requested)
     if torch.cuda.is_available():
         return torch.device("cuda")
     if any(os.environ.get(name) for name in _SLURM_GPU_VARIABLES):
-        raise SystemExit(
+        print(
             "Slurm allocated a GPU but CUDA is unavailable on this node; refusing "
             "to fall back to the CPU. Resubmit, excluding this node (sbatch "
-            "--exclude=<node>), or pass --device cpu to train on the CPU anyway."
+            "--exclude=<node>), or pass --device cpu to train on the CPU anyway.",
+            file=sys.stderr,
         )
+        raise SystemExit(NO_GPU_EXIT_CODE)
     return torch.device("cpu")
 
 

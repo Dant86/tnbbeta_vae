@@ -109,8 +109,9 @@ def test_select_device_refuses_a_silent_cpu_fallback_under_slurm(
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     monkeypatch.setenv("SLURM_JOB_GPUS", "0")
 
-    with pytest.raises(SystemExit, match="refusing"):
+    with pytest.raises(SystemExit) as excinfo:
         train_main._select_device(None)
+    assert excinfo.value.code == train_main.NO_GPU_EXIT_CODE
     assert train_main._select_device("cpu").type == "cpu"
 
 
