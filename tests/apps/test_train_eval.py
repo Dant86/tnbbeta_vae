@@ -98,3 +98,24 @@ def test_resume_skips_completed_and_continues_partial(
 def test_uniform_prior_rejected_for_non_tnbbeta_models() -> None:
     with pytest.raises(SystemExit):
         train_main.main(_train_args("conv_gaussian_vae", ["--uniform-prior"], epochs=1))
+
+
+def test_select_device_refuses_a_silent_cpu_fallback_under_slurm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setenv("SLURM_JOB_GPUS", "0")
+
+    with pytest.raises(SystemExit, match="refusing"):
+        train_main._select_device(None)
+    assert train_main._select_device("cpu").type == "cpu"
+
+
+def test_select_device_uses_cpu_when_no_gpu_was_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    for name in train_main._SLURM_GPU_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+
+    assert train_main._select_device(None).type == "cpu"
