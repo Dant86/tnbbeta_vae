@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+import torch
 from torch.utils.data import Dataset
 
 if TYPE_CHECKING:
@@ -53,3 +54,11 @@ class Cifar10Images(Dataset):
     def __getitem__(self, index: int) -> Tensor:
         """Returns image ``index`` as a ``(3, 32, 32)`` tensor in ``[0, 1]``."""
         return cast("Any", self._base)[index][0]
+
+    def labels(self) -> Tensor:
+        """Returns all class labels (0-9), in dataset order, as an int64 tensor."""
+        base = cast("Any", self._base)
+        targets = getattr(base, "targets", None)
+        if targets is None:
+            targets = [base[i][1] for i in range(len(base))]
+        return torch.as_tensor(targets, dtype=torch.long)
