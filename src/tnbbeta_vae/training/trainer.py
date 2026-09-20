@@ -7,9 +7,11 @@ lives on the model via the ``training_step`` protocol below, not here.
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+import shutil
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import torch
 
@@ -82,14 +84,19 @@ class Trainer[BatchT]:
         )
         self.step = 0
         self.epochs_completed = 0
+        self.best_val_loss = math.inf
+        self.epochs_since_improvement = 0
 
     def fit(
         self,
         dataloader: Iterable[BatchT],
         num_epochs: int,
         checkpoint_dir: Path | None = None,
+        val_dataloader: Iterable[BatchT] | None = None,
+        patience: int | None = None,
+        kl_warmup_epochs: int = 0,
     ) -> None:
-        """Trains until ``num_epochs`` epochs are complete.
+        """Trains until ``num_epochs`` epochs are complete or patience runs out.
 
         Continues from ``self.epochs_completed`` (nonzero after
         :meth:`load_checkpoint`), so a resumed run only does the remaining
@@ -100,13 +107,34 @@ class Trainer[BatchT]:
                 ``training_step``. Must be re-iterable once per epoch.
             num_epochs: Total number of epochs to have completed at the end.
             checkpoint_dir: If given, ``latest.pt`` is rewritten after every
-                epoch and ``final.pt`` once training completes.
+                epoch and ``final.pt`` once training ends. With a
+                ``val_dataloader``, ``best.pt`` is rewritten whenever the
+                validation loss improves and ``final.pt`` is a copy of it.
+            val_dataloader: Held-out batches. After every epoch the mean
+                validation loss (the unweighted negative ELBO) is logged as
+                ``val_loss``.
+            patience: With a ``val_dataloader``, stop once this many epochs pass
+                without a new best validation loss. Only epochs after the KL
+                warm-up count, because the validation loss is the full ELBO and
+                is not comparable to a half-weighted training objective.
+            kl_warmup_epochs: If positive, the KL weight rises linearly from 0
+                to 1 over this many epochs and is passed to the model's
+                ``training_step`` as ``kl_weight``.
         """
-        self.model.train()
         for epoch in range(self.epochs_completed, num_epochs):
+            if patience is not None and self.epochs_since_improvement >= patience:
+                break
+            self.model.train()
+            kl_weight = (
+                min(1.0, epoch / kl_warmup_epochs) if kl_warmup_epochs > 0 else 1.0
+            )
             for batch in dataloader:
                 self.optimizer.zero_grad()
-                outputs = self.model.training_step(batch)
+                if kl_warmup_epochs > 0:
+                    step_model = cast("Any", self.model)
+                    outputs = step_model.training_step(batch, kl_weight=kl_weight)
+                else:
+                    outputs = self.model.training_step(batch)
                 outputs["loss"].backward()
                 self.optimizer.step()
 
@@ -114,11 +142,17 @@ class Trainer[BatchT]:
                 self.run_logger.log_metrics(step=self.step, metrics=metrics)
                 self.step += 1
             self.epochs_completed = epoch + 1
-            self.run_logger.log_metrics(step=self.step, metrics={"epoch": epoch})
+            epoch_record: dict[str, float] = {"epoch": epoch, "kl_weight": kl_weight}
+            if val_dataloader is not None:
+                val_loss = self._validate(val_dataloader)
+                epoch_record["val_loss"] = val_loss
+                if kl_weight >= 1.0:
+                    self._track_best(val_loss, checkpoint_dir)
+            self.run_logger.log_metrics(step=self.step, metrics=epoch_record)
             if checkpoint_dir is not None:
                 self.save_checkpoint(checkpoint_dir / "latest.pt")
         if checkpoint_dir is not None:
-            self.save_checkpoint(checkpoint_dir / "final.pt")
+            self._write_final(checkpoint_dir)
         self.run_logger.close()
 
     def save_checkpoint(self, path: Path) -> None:
@@ -141,6 +175,8 @@ class Trainer[BatchT]:
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "epochs_completed": self.epochs_completed,
                 "step": self.step,
+                "best_val_loss": self.best_val_loss,
+                "epochs_since_improvement": self.epochs_since_improvement,
             },
             temporary,
         )
@@ -157,3 +193,36 @@ class Trainer[BatchT]:
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.epochs_completed = checkpoint["epochs_completed"]
         self.step = checkpoint["step"]
+        self.best_val_loss = checkpoint.get("best_val_loss", math.inf)
+        self.epochs_since_improvement = checkpoint.get("epochs_since_improvement", 0)
+
+    @torch.no_grad()
+    def _validate(self, val_dataloader: Iterable[BatchT]) -> float:
+        """Returns the mean per-example validation loss (model in eval mode)."""
+        self.model.train(False)
+        total, count = 0.0, 0
+        for batch in val_dataloader:
+            size = len(cast("Any", batch))
+            total += self.model.training_step(batch)["loss"].item() * size
+            count += size
+        self.model.train(True)
+        return total / count
+
+    def _track_best(self, val_loss: float, checkpoint_dir: Path | None) -> None:
+        if val_loss < self.best_val_loss:
+            self.best_val_loss = val_loss
+            self.epochs_since_improvement = 0
+            if checkpoint_dir is not None:
+                self.save_checkpoint(checkpoint_dir / "best.pt")
+        else:
+            self.epochs_since_improvement += 1
+
+    def _write_final(self, checkpoint_dir: Path) -> None:
+        """Writes ``final.pt``: the best checkpoint if there is one, else current."""
+        best = checkpoint_dir / "best.pt"
+        if not best.exists():
+            self.save_checkpoint(checkpoint_dir / "final.pt")
+            return
+        temporary = checkpoint_dir / "final.pt.tmp"
+        shutil.copyfile(best, temporary)
+        os.replace(temporary, checkpoint_dir / "final.pt")
