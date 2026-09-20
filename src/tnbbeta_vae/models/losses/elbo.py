@@ -124,7 +124,7 @@ def pixel_log_likelihood(
     """Returns ``log p(x | z)`` summed over the image dimensions.
 
     Args:
-        x: Target images, shape ``(batch, channels, height, width)``.
+        x: Targets, shape ``(batch, *event_shape)`` (images or vectors).
         reconstruction: Decoder output for ``x``, with any leading sample
             dimensions in front of ``x``'s shape (e.g. ``(samples, batch, ...)``):
             the Gaussian mean, or the pixel logits for ``"bernoulli"``.
@@ -133,7 +133,8 @@ def pixel_log_likelihood(
             ignored for ``"bernoulli"``.
 
     Returns:
-        Tensor of shape ``reconstruction.shape[:-3]``.
+        Tensor of shape ``reconstruction.shape[:-(x.dim() - 1)]``: the
+        log-likelihood summed over ``x``'s event dimensions.
     """
     if likelihood == "bernoulli":
         per_pixel = -binary_cross_entropy_with_logits(
@@ -141,4 +142,4 @@ def pixel_log_likelihood(
         )
     else:
         per_pixel = Normal(reconstruction, likelihood_scale).log_prob(x)
-    return per_pixel.sum(dim=(-3, -2, -1))
+    return per_pixel.sum(dim=tuple(range(1 - x.dim(), 0)))

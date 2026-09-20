@@ -19,6 +19,7 @@ from torch import Tensor, nn
 from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
 from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
+from tnbbeta_vae.models.heads import tnbbeta_posterior
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.models.priors.tnbbeta_spherical import (
@@ -28,12 +29,6 @@ from tnbbeta_vae.models.priors.tnbbeta_spherical import (
 from tnbbeta_vae.registry import register_model
 
 __all__ = ["ConvTNBBetaSphericalVAE", "ConvTNBBetaSphericalVAEConfig"]
-
-_PARAM_EPS = 1e-4
-# Bounds for the posterior's p and q. A clamped value passes no gradient; 1e-6 keeps
-# the bound off the fitted values (at 1e-4, p sat exactly on it at latent_dim=2) while
-# staying above what float32 can resolve near 1 (about 1e-7).
-_PQ_CLAMP = 1e-6
 
 
 class ConvTNBBetaSphericalVAEConfig(BaseModel):
@@ -192,19 +187,8 @@ class ConvTNBBetaSphericalVAE(nn.Module):
 
     def _encode(self, x: Tensor) -> TNBBetaSpherical:
         """Maps images to a per-example TNBBetaSpherical posterior."""
-        features = self.encoder(x)
-        raw_direction, raw_p, raw_q, raw_epsilon = self.posterior_head(features).split(
-            [self.config.latent_dim, 1, 1, 1], dim=-1
-        )
-
-        mean_direction = raw_direction / raw_direction.norm(
-            dim=-1, keepdim=True
-        ).clamp_min(_PARAM_EPS)
-        p = torch.sigmoid(raw_p.squeeze(-1)).clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
-        q = torch.sigmoid(raw_q.squeeze(-1)).clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
-        epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
-
-        return TNBBetaSpherical(mean_direction, p, q, epsilon)
+        raw = self.posterior_head(self.encoder(x))
+        return tnbbeta_posterior(raw, self.config.latent_dim)
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:
         """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""

@@ -95,3 +95,13 @@ def test_pixel_log_likelihood_broadcasts_over_leading_sample_dimensions() -> Non
     assert bernoulli.shape == gaussian.shape == (5, 3)
     single = pixel_log_likelihood(x, logits[2], "bernoulli")
     assert torch.allclose(bernoulli[2], single)
+
+
+def test_pixel_log_likelihood_sums_over_the_event_dimensions_of_vectors_too() -> None:
+    x = torch.randn(3, 7)
+    mean = torch.randn(5, 3, 7)
+
+    result = pixel_log_likelihood(x, mean, "gaussian", 0.5)
+
+    assert result.shape == (5, 3)
+    assert torch.allclose(result, Normal(mean, 0.5).log_prob(x).sum(-1))
