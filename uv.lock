@@ -2301,6 +2301,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pytorch-fid" },
     { name = "pyyaml" },
+    { name = "scipy" },
     { name = "torch" },
     { name = "torchvision" },
 ]
@@ -2324,6 +2325,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "pytorch-fid", specifier = ">=0.3.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "scipy", specifier = ">=1.18.1" },
     { name = "torch", specifier = ">=2.14.0" },
     { name = "torchvision", specifier = ">=0.29.0" },
 ]
