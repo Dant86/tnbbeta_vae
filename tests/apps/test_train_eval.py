@@ -79,7 +79,7 @@ def test_train_then_eval(model: str, extra: list[str], tmp_path: Path) -> None:
         assert key in results
     assert results["model_name"] == model
     assert (run_checkpoints / "prior_samples_final.png").exists()
-    assert (run_checkpoints / "reconstructions_final.png").exists()
+    assert (run_checkpoints / "reconstructions_final_test.png").exists()
 
 
 def test_resume_skips_completed_and_continues_partial(
