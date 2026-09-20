@@ -16,8 +16,7 @@ from tnbbeta_vae.data.cifar10 import Cifar10Images
 
 _MODELS = [
     ("conv_gaussian_vae", []),
-    ("conv_vmf_vae", []),
-    ("conv_tnbbeta_spherical_vae", ["--uniform-prior"]),
+    ("conv_tnbbeta_spherical_vae", []),
 ]
 
 
@@ -96,11 +95,6 @@ def test_resume_skips_completed_and_continues_partial(
     assert "Resumed from epoch 1" in capsys.readouterr().out
     checkpoint = torch.load(tmp_path / "ckpt" / "smoke" / "final.pt")
     assert checkpoint["epochs_completed"] == 2
-
-
-def test_uniform_prior_rejected_for_non_tnbbeta_models() -> None:
-    with pytest.raises(SystemExit):
-        train_main.main(_train_args("conv_gaussian_vae", ["--uniform-prior"], epochs=1))
 
 
 def test_select_device_refuses_a_silent_cpu_fallback_under_slurm(

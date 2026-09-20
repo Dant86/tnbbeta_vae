@@ -8,15 +8,15 @@ Writes ``$TNBBETA_CHECKPOINT_DIR/<run-name>/latents_<checkpoint>_<split>.npz``
 with, per image and in dataset order:
 
 * ``labels``: CIFAR-10 class (0-9).
-* ``direction``: the posterior's mean direction (TNBBeta, vMF) or mean (Gaussian).
+* ``direction``: the posterior's mean direction (TNBBeta) or mean (Gaussian).
 * ``mode_direction``: TNBBeta only -- the direction the posterior is centered
   on. The parameterization has an antipodal alias ((mu, p) and (-mu, 1 - p)
   describe the same distribution), so this is ``direction`` if ``p > 0.5`` and
   ``-direction`` otherwise.
 * ``p``, ``q``, ``epsilon``: TNBBeta posterior parameters (TNBBeta only).
-* ``concentration``: vMF kappa, or the Gaussian's mean posterior std (per image).
+* ``concentration``: the Gaussian's mean posterior std (per image; Gaussian only).
 * ``z``: one posterior sample.
-* ``kl``: per-image KL to the prior (exact for Gaussian and vMF, a 16-sample
+* ``kl``: per-image KL to the prior (exact for the Gaussian, a 16-sample
   Monte Carlo estimate for TNBBeta).
 
 It also writes ``latent_probe_<checkpoint>_<split>.json`` with the accuracy of
@@ -110,13 +110,6 @@ def _encode_batch(
         }
     posterior = model._encode(batch)
     prior = model.prior()
-    if kind == "conv_vmf_vae":
-        return {
-            "direction": posterior.loc,
-            "concentration": posterior.scale.squeeze(-1),
-            "z": posterior.sample(),
-            "kl": kl_divergence(posterior, prior),
-        }
     z = posterior.sample((_KL_SAMPLES,))
     kl = (posterior.log_prob(z) - prior.log_prob(z)).mean(dim=0)
     direction = posterior.mean_direction

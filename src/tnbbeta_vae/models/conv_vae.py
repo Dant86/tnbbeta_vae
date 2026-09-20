@@ -19,7 +19,10 @@ from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
 from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
-from tnbbeta_vae.models.priors.tnbbeta_spherical import FixedTNBBetaSphericalPrior
+from tnbbeta_vae.models.priors.tnbbeta_spherical import (
+    FixedTNBBetaSphericalPrior,
+    uniform_prior_params,
+)
 from tnbbeta_vae.registry import register_model
 
 __all__ = ["ConvTNBBetaSphericalVAE", "ConvTNBBetaSphericalVAEConfig"]
@@ -42,9 +45,6 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
         latent_dim: Ambient dimension of the latent sphere S^(latent_dim
             - 1). Kept small by default so the latent space stays cheap to
             inspect/visualize while getting the pipeline working.
-        prior_p: Fixed prior median, in (0, 1).
-        prior_q: Fixed prior concentration, in (0, 1).
-        prior_epsilon: Fixed prior boundary parameter, > 0.
         likelihood_scale: Starting value of the Gaussian reconstruction
             likelihood's standard deviation. It is learned (one scalar shared by
             all pixels, parameterized by log sigma^2), so this only sets where
@@ -59,9 +59,6 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     image_size: int = 32
     hidden_channels: int = 32
     latent_dim: int = 8
-    prior_p: float = 0.9
-    prior_q: float = 0.9
-    prior_epsilon: float = 1.0
     likelihood_scale: float = 1.0
     num_elbo_samples: int = 1
 
@@ -93,7 +90,7 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         )
         self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
         self.prior = FixedTNBBetaSphericalPrior(
-            config.latent_dim, config.prior_p, config.prior_q, config.prior_epsilon
+            config.latent_dim, *uniform_prior_params(config.latent_dim)
         )
 
     def forward(self, x: Tensor) -> tuple[Tensor, TNBBetaSpherical, Tensor]:

@@ -17,7 +17,6 @@ from torch import Tensor, nn
 from torch.distributions import Independent, Normal
 
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
-from tnbbeta_vae.models.diagnostics import gaussian_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
@@ -105,8 +104,7 @@ class ConvGaussianVAE(nn.Module):
 
         Returns:
             A dict with ``"loss"`` (the mean negative ELBO), ``"log_likelihood"``,
-            ``"kl"``, and Gaussian collapse diagnostics (see
-            :func:`tnbbeta_vae.models.diagnostics.gaussian_posterior_diagnostics`).
+            ``"kl"`` and ``"likelihood_scale"``.
         """
         scale = self.learned_scale()
         mu, sigma = self._encode(batch)
@@ -126,7 +124,6 @@ class ConvGaussianVAE(nn.Module):
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
             "likelihood_scale": torch.as_tensor(scale).detach(),
-            **gaussian_posterior_diagnostics(mu, sigma),
         }
 
     @torch.no_grad()

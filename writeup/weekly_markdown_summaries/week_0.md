@@ -158,5 +158,8 @@ corresponds to sigma^2 = 0.5, a regime where sphere posteriors are weakly reward
 
 - Added: CIFAR-10 pipeline and cluster scripts, vMF baseline, latent export and plotting,
   learned sigma, Trainer checkpoints, automatic GPU-node retry.
-- Removed at the end of the week: the fixed-sigma option, and the configurable p/q clamp
-  (now fixed at 1e-6).
+- Removed at the end of the week: the fixed-sigma option, the configurable p/q clamp (now
+  fixed at 1e-6), TNBBeta's configurable prior and `--uniform-prior` flag (the prior is
+  always Uniform(sphere)), the geodesic-sweep helpers, all diagnostics except the p/q/epsilon
+  summaries, and the vMF baseline. The vMF code is archived at the git tag
+  `vmf-baseline-archive`; the vMF results quoted above were produced with it.

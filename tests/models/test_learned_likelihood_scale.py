@@ -11,7 +11,7 @@ from torch.distributions import Normal
 from tnbbeta_vae.models.losses import LearnedLikelihoodScale
 from tnbbeta_vae.registry import build_model
 
-_MODELS = ["conv_gaussian_vae", "conv_vmf_vae", "conv_tnbbeta_spherical_vae"]
+_MODELS = ["conv_gaussian_vae", "conv_tnbbeta_spherical_vae"]
 
 
 def _build(name: str, **overrides: object) -> Any:

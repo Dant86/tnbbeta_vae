@@ -33,11 +33,6 @@ DIM="${LATENT_DIMS[$((i % ${#LATENT_DIMS[@]}))]}"
 i=$((i / ${#LATENT_DIMS[@]}))
 MODEL="${MODELS[$i]}"
 
-EXTRA=()
-if [[ "${MODEL}" == conv_tnbbeta_spherical_vae ]]; then
-    EXTRA+=(--uniform-prior)
-fi
-
 RUN_NAME="${MODEL#conv_}_d${DIM}_h${HIDDEN_CHANNELS}_seed${SEED}"
 echo "Task ${SLURM_ARRAY_TASK_ID}: ${RUN_NAME}"
 
@@ -46,4 +41,4 @@ uv run --no-sync python -m apps.train.main \
     --set latent_dim="${DIM}" --set likelihood_scale="${LIKELIHOOD_SCALE_START}" \
     --set hidden_channels="${HIDDEN_CHANNELS}" \
     --epochs "${EPOCHS}" --seed "${SEED}" \
-    --num-workers "${SLURM_CPUS_PER_TASK:-4}" ${EXTRA[@]+"${EXTRA[@]}"}
+    --num-workers "${SLURM_CPUS_PER_TASK:-4}"

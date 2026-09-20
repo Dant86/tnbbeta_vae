@@ -2,17 +2,10 @@
 
 from __future__ import annotations
 
-import math
-
 import torch
 
 from tnbbeta_vae.distributions import TNBBetaSpherical
-from tnbbeta_vae.models.diagnostics import (
-    gaussian_posterior_diagnostics,
-    random_tangent_direction,
-    sphere_geodesic_sweep,
-    tnbbeta_spherical_posterior_diagnostics,
-)
+from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 
 
 def test_diagnostics_contain_expected_keys_and_are_finite() -> None:
@@ -28,7 +21,6 @@ def test_diagnostics_contain_expected_keys_and_are_finite() -> None:
         "posterior_q_min",
         "posterior_q_max",
         "posterior_epsilon_mean",
-        "posterior_direction_pairwise_cosine_mean",
     }
     assert set(diagnostics) == expected_keys
     for value in diagnostics.values():
@@ -47,120 +39,20 @@ def test_min_mean_max_are_ordered() -> None:
     assert diagnostics["posterior_q_mean"] <= diagnostics["posterior_q_max"]
 
 
-def test_pairwise_cosine_key_absent_for_batch_size_one() -> None:
-    posterior = _random_posterior(batch_size=1, dim=4)
-
-    diagnostics = tnbbeta_spherical_posterior_diagnostics(posterior)
-
-    assert "posterior_direction_pairwise_cosine_mean" not in diagnostics
-
-
-def test_pairwise_cosine_is_one_for_a_collapsed_posterior() -> None:
-    """A posterior collapsed onto a single direction should read cosine ~= 1."""
-    mean_direction = torch.zeros(6, 4)
-    mean_direction[:, 0] = 1.0
+def test_values_match_the_posterior_parameters() -> None:
+    mean_direction = torch.eye(3)[:2]
     posterior = TNBBetaSpherical(
-        mean_direction, p=torch.full((6,), 0.01), q=torch.full((6,), 0.999), epsilon=1.0
+        mean_direction,
+        p=torch.tensor([0.2, 0.6]),
+        q=torch.tensor([0.1, 0.3]),
+        epsilon=torch.tensor([2.0, 4.0]),
     )
 
     diagnostics = tnbbeta_spherical_posterior_diagnostics(posterior)
 
-    assert diagnostics["posterior_direction_pairwise_cosine_mean"] > 0.999
-
-
-def test_pairwise_cosine_is_near_zero_for_diverse_directions() -> None:
-    """Independent random directions in dim=4 should read cosine near 0, not 1."""
-    torch.manual_seed(0)
-    posterior = _random_posterior(batch_size=200, dim=4)
-
-    diagnostics = tnbbeta_spherical_posterior_diagnostics(posterior)
-
-    assert diagnostics["posterior_direction_pairwise_cosine_mean"].abs() < 0.2
-
-
-def test_random_tangent_direction_is_orthogonal_and_unit_norm() -> None:
-    torch.manual_seed(0)
-    base_point = torch.randn(10, 5)
-    base_point = base_point / base_point.norm(dim=-1, keepdim=True)
-
-    tangent = random_tangent_direction(base_point)
-
-    assert torch.allclose(tangent.norm(dim=-1), torch.ones(10), atol=1e-5)
-    assert torch.allclose((tangent * base_point).sum(-1), torch.zeros(10), atol=1e-5)
-
-
-def test_geodesic_sweep_stays_on_sphere() -> None:
-    torch.manual_seed(1)
-    base_point = torch.randn(5)
-    base_point = base_point / base_point.norm()
-    tangent = random_tangent_direction(base_point)
-    angles = torch.linspace(-math.pi, math.pi, 9)
-
-    points = sphere_geodesic_sweep(base_point, tangent, angles)
-
-    assert points.shape == (9, 5)
-    assert torch.allclose(points.norm(dim=-1), torch.ones(9), atol=1e-5)
-
-
-def test_geodesic_sweep_endpoints_match_base_and_tangent() -> None:
-    base_point = torch.randn(5)
-    base_point = base_point / base_point.norm()
-    tangent = random_tangent_direction(base_point)
-
-    at_zero = sphere_geodesic_sweep(base_point, tangent, torch.tensor([0.0]))
-    at_quarter_turn = sphere_geodesic_sweep(
-        base_point, tangent, torch.tensor([math.pi / 2])
-    )
-
-    assert torch.allclose(at_zero[0], base_point, atol=1e-6)
-    assert torch.allclose(at_quarter_turn[0], tangent, atol=1e-6)
-
-
-def test_geodesic_sweep_angular_distance_matches_angle() -> None:
-    """The whole point: moving by angle theta should be theta radians away."""
-    torch.manual_seed(2)
-    base_point = torch.randn(6)
-    base_point = base_point / base_point.norm()
-    tangent = random_tangent_direction(base_point)
-    angles = torch.tensor([0.1, 0.5, 1.0, 2.0])
-
-    points = sphere_geodesic_sweep(base_point, tangent, angles)
-    cosine_to_base = (points * base_point).sum(-1).clamp(-1, 1)
-    traveled = torch.acos(cosine_to_base)
-
-    assert torch.allclose(traveled, angles, atol=1e-5)
-
-
-def test_gaussian_diagnostics_flag_a_collapsed_posterior() -> None:
-    """mu constant across the batch and sigma=1 is the classic collapse."""
-    mu = torch.zeros(32, 8)
-    sigma = torch.ones(32, 8)
-
-    diagnostics = gaussian_posterior_diagnostics(mu, sigma)
-
-    assert diagnostics["posterior_active_units"] == 0
-    assert diagnostics["posterior_mu_std_mean"] == 0
-    assert diagnostics["posterior_sigma_mean"] == 1
-
-
-def test_gaussian_diagnostics_count_active_units() -> None:
-    torch.manual_seed(3)
-    mu = torch.zeros(256, 6)
-    mu[:, :2] = torch.randn(256, 2)  # only the first two dims vary across x
-    sigma = torch.full((256, 6), 0.5)
-
-    diagnostics = gaussian_posterior_diagnostics(mu, sigma)
-
-    assert diagnostics["posterior_active_units"] == 2
-    assert diagnostics["posterior_sigma_min"] == diagnostics["posterior_sigma_max"]
-
-
-def test_gaussian_diagnostics_omit_batch_stats_for_batch_size_one() -> None:
-    diagnostics = gaussian_posterior_diagnostics(torch.zeros(1, 4), torch.ones(1, 4))
-
-    assert "posterior_active_units" not in diagnostics
-    assert "posterior_mu_std_mean" not in diagnostics
-    assert "posterior_sigma_mean" in diagnostics
+    assert torch.isclose(diagnostics["posterior_p_mean"], torch.tensor(0.4))
+    assert diagnostics["posterior_q_max"] == 0.3
+    assert diagnostics["posterior_epsilon_mean"] == 3.0
 
 
 def _random_posterior(batch_size: int, dim: int) -> TNBBetaSpherical:

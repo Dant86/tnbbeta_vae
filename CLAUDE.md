@@ -58,10 +58,9 @@ automatically on commit, excluding `notebooks/`.
   `ConvGaussianVAE` is a Gaussian baseline on the same encoder/decoder
   (closed-form KL via `monte_carlo_elbo(..., analytic_kl=True)`) for
   separating latent-family effects from architecture/data effects.
-  `conv_vmf_vae.py`'s `ConvVonMisesFisherVAE` is a hyperspherical
-  baseline using a port of the original S-VAE vMF (Wood rejection
-  sampler, Bessel-function KL via `scipy`); keep it faithful to that
-  reference rather than "improving" it, since it is the comparison point.
+  The TNBBeta prior is always Uniform(sphere), derived from `latent_dim`.
+  The S-VAE vMF baseline was removed; it is archived at the git tag
+  `vmf-baseline-archive`.
 - The likelihood scale sigma is always learned (`LearnedLikelihoodScale`, log
   sigma^2); `likelihood_scale` in each model config is only its starting value. Do not
   add a fixed-sigma option back: it made results depend on a hand-picked number.

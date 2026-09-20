@@ -12,16 +12,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   fixed-sigma mode. TNBBeta's posterior p and q are clamped to [1e-6, 1 - 1e-6].
 - CIFAR-10 workflow: `tnbbeta_vae.data.load_cifar10` (torchvision),
   `apps/data/download_cifar10.py`, a working `apps/train/main.py`
-  (checkpointing, `--resume`, `--uniform-prior`), `apps/eval/main.py`
+  (checkpointing, `--resume`), `apps/eval/main.py`
   (ELBO, KL, MSE/PSNR, prior-sample nearest-neighbour score, sample
   images), `Trainer.save_checkpoint`/`load_checkpoint`,
   `tnbbeta_vae.paths` (`.env`-configured data/checkpoint/runs
   directories, see `.env.sample`), a `generate()` method on every model,
   and `sbatch` scripts under `scripts/slurm/` for the UChicago DSI cluster.
-- `tnbbeta_vae.distributions.VonMisesFisher` and `HypersphericalUniform`,
-  ported from the S-VAE reference implementation (Davidson et al., 2018),
-  and `ConvVonMisesFisherVAE` (`"conv_vmf_vae"`) as a hyperspherical
-  baseline with analytic KL.
 - Project scaffolding: `uv`-managed package, ruff + pyright + pre-commit,
   GitHub Actions CI, branch protection.
 - `tnbbeta_vae.distributions.TNBBetaUnivariate`: the univariate TNBbeta
@@ -50,9 +46,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   non-learnable `TNBBetaSpherical` prior (mirrors the role of N(0, I) in
   a vanilla VAE).
 - `tnbbeta_vae.models.diagnostics.tnbbeta_spherical_posterior_diagnostics`:
-  per-batch posterior-collapse statistics (p/q min/mean/max, pairwise
-  mean-direction cosine similarity), now logged by `ConvTNBBetaSphericalVAE
-  .training_step` alongside loss/kl.
+  per-batch p/q min/mean/max and mean epsilon, logged by
+  `ConvTNBBetaSphericalVAE.training_step` alongside loss/kl.
 - `tnbbeta_vae.data.gaussian_blob_batch`: a synthetic dataset with known
   ground-truth generative factors (hue, position), for fast local
   experiments before touching real data.
@@ -67,19 +62,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   collapsing toward a concentrated prior's single point.
 - `ConvEncoder`/`ConvDecoder` now have `GroupNorm` after every
   conv/deconv/projection layer (except the final output). Motivated by a
-  geodesic sensitivity sweep (see below) showing the decoder swinging
+  an early geodesic sensitivity sweep showing the decoder swinging
   output color wildly along *any* latent direction rather than some
   dedicated "color" subspace -- a poorly-conditioned, entangled mapping
   that left no safe direction for the encoder to route weakly-rewarded
   information through without disturbing already-encoded information.
   `hidden_channels` must now be divisible by 8.
-- `tnbbeta_vae.models.diagnostics.sphere_geodesic_sweep` and
-  `random_tangent_direction`: move a point along a true great-circle
-  geodesic at a controlled angular distance. Perturbing a single
-  Cartesian coordinate and renormalizing back onto the sphere is *not* a
-  fair way to compare sensitivity across directions -- the actual
-  angular distance moved for a fixed offset depends on how much that
-  coordinate already overlaps with the base point.
 - `tnbbeta_vae.models.conv_gaussian_vae.ConvGaussianVAE` (registered as
   `"conv_gaussian_vae"`): a standard diagonal-Gaussian VAE on the same
   `ConvEncoder`/`ConvDecoder`, N(0, I) prior, closed-form KL. A baseline for
@@ -90,5 +78,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   instead of a Monte Carlo KL estimate where a closed form exists. Raises
   `NotImplementedError` for pairs without one (e.g. anything involving
   `TNBBetaSpherical`) rather than silently falling back.
-- `gaussian_posterior_diagnostics`: Gaussian counterpart to the spherical
-  collapse diagnostics (sigma stats, across-batch mu std, active units).
+
+### Removed
+
+- The S-VAE von Mises-Fisher baseline (`VonMisesFisher`, `HypersphericalUniform`,
+  `ConvVonMisesFisherVAE`, and the `scipy` dependency). It is archived at the git tag
+  `vmf-baseline-archive`.
+- `sphere_geodesic_sweep` and `random_tangent_direction`, the Gaussian/vMF posterior
+  diagnostics, and the pairwise-cosine collapse diagnostic (only the p/q/epsilon
+  summaries remain).
+- TNBBeta's configurable prior (`prior_p`, `prior_q`, `prior_epsilon`) and the
+  `--uniform-prior` flag: the prior is always Uniform(sphere).
+- The fixed-sigma option and the configurable p/q clamp.

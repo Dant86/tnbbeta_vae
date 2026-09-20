@@ -2,7 +2,7 @@
 # Trains one model. Submit from the repo root:
 #   sbatch scripts/slurm/train.sbatch <model> <run-name> [extra train args...]
 # e.g.
-#   sbatch scripts/slurm/train.sbatch conv_vmf_vae vmf_s0.1_d32_seed0 \
+#   sbatch scripts/slurm/train.sbatch conv_tnbbeta_spherical_vae tnb_d32_seed0 \
 #       --set latent_dim=32 --set likelihood_scale=0.1 --epochs 50
 #
 # Safe to resubmit or requeue: --resume continues from the run's latest
