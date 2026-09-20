@@ -9,7 +9,7 @@ import torch
 import torchvision
 
 from tnbbeta_vae.data import mnist
-from tnbbeta_vae.data.mnist import MnistImages, load_mnist
+from tnbbeta_vae.data.mnist import DeviceBatches, MnistImages, load_mnist
 
 
 def test_dynamic_images_are_resampled_and_fixed_ones_are_not() -> None:
@@ -58,3 +58,40 @@ def test_load_mnist_splits_train_val_test(monkeypatch: pytest.MonkeyPatch) -> No
     assert torch.equal(val[0], val[0]) and torch.equal(test[0], test[0])
     again = load_mnist(Path("unused"), split="val")
     assert torch.equal(val.labels(), again.labels())
+
+
+def _intensities(count: int) -> torch.Tensor:
+    return torch.full((count, 1, 28, 28), 0.5)
+
+
+def test_device_batches_cover_every_image_once_and_respect_drop_last() -> None:
+    images = torch.arange(10).float().view(10, 1, 1, 1).expand(10, 1, 28, 28) / 10
+    fixed = MnistImages(images, torch.arange(10), dynamic=False)
+    device = torch.device("cpu")
+
+    keep = DeviceBatches(fixed, 4, device, shuffle=False)
+    drop = DeviceBatches(fixed, 4, device, shuffle=False, drop_last=True)
+
+    assert [len(batch) for batch in keep] == [4, 4, 2] and len(keep) == 3
+    assert [len(batch) for batch in drop] == [4, 4] and len(drop) == 2
+    assert torch.equal(torch.cat(list(keep)), fixed.images)
+
+
+def test_device_batches_shuffle_each_pass_and_resample_dynamic_pixels() -> None:
+    torch.manual_seed(0)
+    dynamic = MnistImages(_intensities(64), torch.arange(64), dynamic=True)
+    batches = DeviceBatches(dynamic, 16, torch.device("cpu"), shuffle=True)
+
+    first = torch.cat(list(batches))
+    second = torch.cat(list(batches))
+
+    assert set(first.unique().tolist()) <= {0.0, 1.0}
+    assert not torch.equal(first, second)
+    assert 0.4 < first.mean() < 0.6
+
+
+def test_fixed_device_batches_are_identical_across_passes() -> None:
+    fixed = MnistImages(torch.rand(20, 1, 28, 28), torch.arange(20), dynamic=False)
+    batches = DeviceBatches(fixed, 8, torch.device("cpu"), shuffle=False)
+
+    assert torch.equal(torch.cat(list(batches)), torch.cat(list(batches)))
