@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> None:
         "epochs_completed": checkpoint["epochs_completed"],
         "split": args.split,
         "elbo_samples": args.num_samples,
-        "likelihood_scale": _likelihood_scale(model),
+        "likelihood_scale": model.learned_scale().item(),
         **_elbo_metrics(model, loader, device),
         **_prior_metrics(model, args, device),
     }
@@ -102,12 +102,6 @@ def main(argv: list[str] | None = None) -> None:
     output.write_text(json.dumps(results, indent=2))
     print(json.dumps(results, indent=2))
     print(f"Wrote {output}")
-
-
-def _likelihood_scale(model: Any) -> float:
-    if model.learned_scale is not None:
-        return float(model.learned_scale())
-    return float(model.config.likelihood_scale)
 
 
 @torch.no_grad()

@@ -78,6 +78,9 @@ uv run python -m apps.train.main --model conv_vmf_vae --run-name vmf_test \
 uv run python -m apps.eval.main --run-name vmf_test  # writes eval_final_test.json + PNGs
 ```
 
+The Gaussian likelihood's scale sigma is always learned (one scalar shared by
+all pixels); `--set likelihood_scale=...` only sets its starting value.
+
 Training writes `latest.pt` every epoch and `final.pt` at the end under
 `$TNBBETA_CHECKPOINT_DIR/<run-name>/`; `--resume` continues from
 `latest.pt` (and does nothing if `final.pt` exists), so re-running after a

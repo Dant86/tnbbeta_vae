@@ -7,6 +7,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- The Gaussian likelihood's sigma is a learned scalar (log sigma^2, shared by all
+  pixels) in every model; `likelihood_scale` is only its starting value. There is no
+  fixed-sigma mode. TNBBeta's posterior p and q are clamped to [1e-6, 1 - 1e-6].
 - CIFAR-10 workflow: `tnbbeta_vae.data.load_cifar10` (torchvision),
   `apps/data/download_cifar10.py`, a working `apps/train/main.py`
   (checkpointing, `--resume`, `--uniform-prior`), `apps/eval/main.py`
