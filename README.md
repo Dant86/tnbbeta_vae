@@ -100,6 +100,8 @@ uv run python -m apps.train.main --model conv_tnbbeta_spherical_vae --dataset mn
 uv run python -m apps.eval.svae_metrics --run-name mnist_tnb_d10_seed0
 sbatch scripts/slurm/mnist_sweep.sbatch              # 90-task array; edit the grid inside
 uv run python -m apps.eval.svae_table                # Table 1: mean +- std over seeds
+uv run python -m apps.eval.svae_knn --run-name mnist_tnb_d10_seed0   # Table 2: latent k-NN
+uv run python -m apps.eval.svae_table --kind knn     # Table 2 aggregated over seeds
 ```
 
 MNIST is binarized dynamically for training and once (fixed seed) for validation and test.

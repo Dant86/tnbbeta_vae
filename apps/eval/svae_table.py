@@ -1,15 +1,17 @@
 """Aggregates per-run S-VAE metrics into a Table-1-style markdown table.
 
 Usage:
-    uv run python -m apps.eval.svae_table [--prefix mnist] \
+    uv run python -m apps.eval.svae_table [--kind table1|knn] [--prefix mnist] \
         [--models gauss vmf tnb] [--dims 2 5 10 20 40] [--seeds 0 1 2 3 4]
 
-Reads ``svae_metrics_final_<split>.json`` (``apps.eval.svae_metrics``) from
-``$TNBBETA_CHECKPOINT_DIR/<prefix>_<model>_d<dim>_seed<seed>/`` -- the names used
-by ``scripts/slurm/mnist_sweep.sbatch`` -- and prints mean +- standard deviation
-over seeds for LL, L[q] (the ELBO), RE and KL. A mean is bold if it is the best
-for that metric (higher is better for LL, L[q] and RE) and beats every other
-model with a Welch t-test at p < ``--alpha``. KL is never bolded.
+Reads, from ``$TNBBETA_CHECKPOINT_DIR/<prefix>_<model>_d<dim>_seed<seed>/`` (the
+names used by ``scripts/slurm/mnist_sweep.sbatch``), either
+``svae_metrics_final_<split>.json`` (``--kind table1``, ``apps.eval.svae_metrics``:
+LL, L[q] = the ELBO, RE, KL) or ``svae_knn_final.json`` (``--kind knn``,
+``apps.eval.svae_knn``: k-NN accuracy for 100/600/1000 labels), and prints mean +-
+standard deviation over seeds. A mean is bold if it is the best for that metric
+(higher is better; KL is never bolded) and beats every other model with a Welch
+t-test at p < ``--alpha``.
 """
 
 from __future__ import annotations
@@ -25,8 +27,9 @@ from scipy import stats
 from tnbbeta_vae.paths import checkpoint_dir
 
 MODEL_TITLES = {"gauss": "N-VAE", "vmf": "S-VAE (vMF)", "tnb": "TNBBeta"}
-_METRICS = [("ll", "LL"), ("elbo", "L[q]"), ("re", "RE"), ("kl", "KL")]
-_BOLDABLE = {"ll", "elbo", "re"}
+_TABLE1_METRICS = [("ll", "LL"), ("elbo", "L[q]"), ("re", "RE"), ("kl", "KL")]
+_KNN_METRICS = [("acc_100", "N=100"), ("acc_600", "N=600"), ("acc_1000", "N=1000")]
+_BOLDABLE = {"ll", "elbo", "re", "acc_100", "acc_600", "acc_1000"}
 
 Results = dict[tuple[str, int], dict[str, list[float]]]
 
@@ -38,6 +41,7 @@ def main(argv: list[str] | None = None) -> None:
         argv: Argument list, defaulting to ``sys.argv[1:]``.
     """
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--kind", choices=["table1", "knn"], default="table1")
     parser.add_argument("--prefix", default="mnist")
     parser.add_argument("--models", nargs="+", default=["gauss", "vmf", "tnb"])
     parser.add_argument("--dims", nargs="+", type=int, default=[2, 5, 10, 20, 40])
@@ -46,10 +50,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--alpha", type=float, default=0.01)
     args = parser.parse_args(argv)
 
-    results, missing = collect(
-        args.prefix, args.models, args.dims, args.seeds, args.split
+    metrics = _KNN_METRICS if args.kind == "knn" else _TABLE1_METRICS
+    filename = (
+        "svae_knn_final.json"
+        if args.kind == "knn"
+        else f"svae_metrics_final_{args.split}.json"
     )
-    print(render(results, args.models, args.dims, args.alpha))
+    results, missing = collect(
+        args.prefix, args.models, args.dims, args.seeds, filename, metrics
+    )
+    print(render(results, args.models, args.dims, metrics, args.alpha))
     if missing:
         print(
             f"\n{missing} run(s) had no metrics file and were skipped.", file=sys.stderr
@@ -57,7 +67,12 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def collect(
-    prefix: str, models: list[str], dims: list[int], seeds: list[int], split: str
+    prefix: str,
+    models: list[str],
+    dims: list[int],
+    seeds: list[int],
+    filename: str,
+    metrics: list[tuple[str, str]],
 ) -> tuple[Results, int]:
     """Loads every run's metrics.
 
@@ -69,41 +84,43 @@ def collect(
     missing = 0
     for model in models:
         for dim in dims:
-            values: dict[str, list[float]] = {name: [] for name, _ in _METRICS}
+            values: dict[str, list[float]] = {name: [] for name, _ in metrics}
             for seed in seeds:
                 path = (
-                    checkpoint_dir()
-                    / f"{prefix}_{model}_d{dim}_seed{seed}"
-                    / f"svae_metrics_final_{split}.json"
+                    checkpoint_dir() / f"{prefix}_{model}_d{dim}_seed{seed}" / filename
                 )
                 if not path.exists():
                     missing += 1
                     continue
                 record = json.loads(path.read_text())
-                for name, _ in _METRICS:
+                for name, _ in metrics:
                     values[name].append(record[name])
             results[(model, dim)] = values
     return results, missing
 
 
 def render(
-    results: Results, models: list[str], dims: list[int], alpha: float = 0.01
+    results: Results,
+    models: list[str],
+    dims: list[int],
+    metrics: list[tuple[str, str]],
+    alpha: float = 0.01,
 ) -> str:
     """Formats ``results`` as a markdown table (rows: dimensions)."""
     header = ["d"]
     for model in models:
         title = MODEL_TITLES.get(model, model)
-        header += [f"{title} {label}" for _, label in _METRICS]
+        header += [f"{title} {label}" for _, label in metrics]
     lines = ["| " + " | ".join(header) + " |", "|" + "---|" * len(header)]
     for dim in dims:
         cells = [str(dim)]
         winners = {
             name: _significant_winner(results, models, dim, name, alpha)
-            for name, _ in _METRICS
+            for name, _ in metrics
             if name in _BOLDABLE
         }
         for model in models:
-            for name, _ in _METRICS:
+            for name, _ in metrics:
                 values = results.get((model, dim), {}).get(name, [])
                 cells.append(_format(values, winners.get(name) == model))
         lines.append("| " + " | ".join(cells) + " |")
