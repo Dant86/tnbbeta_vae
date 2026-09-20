@@ -10,6 +10,8 @@ TNBbeta, rather than the usual Gaussian.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
@@ -49,6 +51,9 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
             likelihood's standard deviation. It is learned (one scalar shared by
             all pixels, parameterized by log sigma^2), so this only sets where
             training starts.
+        likelihood: ``"gaussian"`` (learned sigma) or ``"bernoulli"`` (binarized
+            images; the decoder logits are the Bernoulli parameters and
+            ``likelihood_scale`` is unused).
         num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
             estimate. Higher values lower variance (there's no
             closed-form KL to fall back on here) at the cost of that many
@@ -60,6 +65,7 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     hidden_channels: int = 32
     latent_dim: int = 8
     likelihood_scale: float = 1.0
+    likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
 
 
@@ -110,12 +116,14 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         reconstruction = self.decoder(z)
         return reconstruction, posterior, z
 
-    def training_step(self, batch: Tensor) -> dict[str, Tensor]:
+    def training_step(self, batch: Tensor, kl_weight: float = 1.0) -> dict[str, Tensor]:
         """Computes the negative ELBO loss for one batch.
 
         Args:
             batch: Input images, shape ``(batch, image_channels,
                 image_size, image_size)``.
+            kl_weight: Multiplier on the KL term in the returned loss (for KL
+                warm-up). ``"kl"`` and ``"log_likelihood"`` are unweighted.
 
         Returns:
             A dict with ``"loss"`` (the mean negative ELBO), plus
@@ -131,12 +139,15 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             batch,
             posterior,
             prior,
-            self.decoder,
+            self._decode_for_likelihood,
             scale,
             self.config.num_elbo_samples,
+            likelihood=self.config.likelihood,
         )
         return {
-            "loss": -elbo_terms["elbo"].mean(),
+            "loss": -(
+                elbo_terms["log_likelihood"] - kl_weight * elbo_terms["kl"]
+            ).mean(),
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
             "likelihood_scale": torch.as_tensor(scale).detach(),
@@ -171,3 +182,9 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
 
         return TNBBetaSpherical(mean_direction, p, q, epsilon)
+
+    def _decode_for_likelihood(self, z: Tensor) -> Tensor:
+        """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""
+        if self.config.likelihood == "bernoulli":
+            return self.decoder.logits(z)
+        return self.decoder(z)

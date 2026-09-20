@@ -30,6 +30,16 @@ _NUM_DOWNSAMPLES = 3  # three stride-2 convs: image_size -> image_size / 8
 _NUM_GROUPS = 8
 
 
+def _padding(image_size: int) -> tuple[int, int]:
+    """Returns the (before, after) zero padding that makes a size divisible by 8.
+
+    Sizes already divisible by 8 (e.g. CIFAR-10's 32) get none; 28 (MNIST) gets 2
+    on each side, i.e. it is padded to 32.
+    """
+    total = -image_size % 2**_NUM_DOWNSAMPLES
+    return total // 2, total - total // 2
+
+
 class ConvEncoder(nn.Module):
     """Downsamples an image to a flat feature vector, three stride-2 convs deep."""
 
@@ -40,28 +50,25 @@ class ConvEncoder(nn.Module):
 
         Args:
             image_channels: Number of input image channels (e.g. 3 for RGB).
-            image_size: Height/width of the (square) input image. Must be
-                divisible by 8.
+            image_size: Height/width of the (square) input image. If it is not
+                divisible by 8 it is zero-padded up to the next multiple of 8
+                (28 becomes 32).
             hidden_channels: Base channel width; doubled at each
                 downsampling stage.
 
         Raises:
-            ValueError: If ``image_size`` isn't divisible by 8, or
-                ``hidden_channels`` isn't divisible by 8 (needed for
+            ValueError: If ``hidden_channels`` isn't divisible by 8 (needed for
                 GroupNorm).
         """
         super().__init__()
-        if image_size % (2**_NUM_DOWNSAMPLES) != 0:
-            raise ValueError(
-                f"image_size must be divisible by {2**_NUM_DOWNSAMPLES} "
-                f"(three stride-2 convs); got {image_size}."
-            )
+        before, after = _padding(image_size)
+        self._pad = (before, after, before, after)
         if hidden_channels % _NUM_GROUPS != 0:
             raise ValueError(
                 f"hidden_channels must be divisible by {_NUM_GROUPS} "
                 f"(GroupNorm); got {hidden_channels}."
             )
-        self.feature_size = image_size // (2**_NUM_DOWNSAMPLES)
+        self.feature_size = (image_size + before + after) // (2**_NUM_DOWNSAMPLES)
         self.out_channels = hidden_channels * 4
         self.out_features = self.out_channels * self.feature_size**2
 
@@ -87,7 +94,7 @@ class ConvEncoder(nn.Module):
         Returns:
             Flat features, shape ``(batch, out_features)``.
         """
-        return self.conv(images).flatten(1)
+        return self.conv(nn.functional.pad(images, self._pad)).flatten(1)
 
 
 class ConvDecoder(nn.Module):
@@ -105,27 +112,24 @@ class ConvDecoder(nn.Module):
         Args:
             latent_dim: Dimensionality of the input latent vector.
             image_channels: Number of output image channels.
-            image_size: Height/width of the (square) output image. Must be
-                divisible by 8.
+            image_size: Height/width of the (square) output image. If it is not
+                divisible by 8 the deconv stack runs at the next multiple of 8
+                and the output is cropped back (32 -> 28).
             hidden_channels: Base channel width, matching the encoder's.
 
         Raises:
-            ValueError: If ``image_size`` isn't divisible by 8, or
-                ``hidden_channels`` isn't divisible by 8 (needed for
+            ValueError: If ``hidden_channels`` isn't divisible by 8 (needed for
                 GroupNorm).
         """
         super().__init__()
-        if image_size % (2**_NUM_DOWNSAMPLES) != 0:
-            raise ValueError(
-                f"image_size must be divisible by {2**_NUM_DOWNSAMPLES} "
-                f"(three stride-2 transposed convs); got {image_size}."
-            )
+        before, after = _padding(image_size)
+        self._crop = slice(before, before + image_size)
         if hidden_channels % _NUM_GROUPS != 0:
             raise ValueError(
                 f"hidden_channels must be divisible by {_NUM_GROUPS} "
                 f"(GroupNorm); got {hidden_channels}."
             )
-        self.feature_size = image_size // (2**_NUM_DOWNSAMPLES)
+        self.feature_size = (image_size + before + after) // (2**_NUM_DOWNSAMPLES)
         self.in_channels = hidden_channels * 4
 
         self.project = nn.Linear(latent_dim, self.in_channels * self.feature_size**2)
@@ -146,7 +150,6 @@ class ConvDecoder(nn.Module):
             nn.GroupNorm(_NUM_GROUPS, hidden_channels),
             nn.ReLU(inplace=True),
             nn.ConvTranspose2d(hidden_channels, image_channels, 4, stride=2, padding=1),
-            nn.Sigmoid(),
         )
 
     def forward(self, z: Tensor) -> Tensor:
@@ -159,11 +162,24 @@ class ConvDecoder(nn.Module):
             Reconstructed image means in [0, 1], shape ``(..., image_channels,
             image_size, image_size)``.
         """
+        return torch.sigmoid(self.logits(z))
+
+    def logits(self, z: Tensor) -> Tensor:
+        """Decodes latent vectors to pre-sigmoid pixel logits.
+
+        Args:
+            z: Latent vectors, shape ``(..., latent_dim)``.
+
+        Returns:
+            Logits with the same shape as :meth:`forward`'s output. A Bernoulli
+            likelihood uses these directly, which is more stable than taking the
+            log of a saturated sigmoid.
+        """
         batch_shape = z.shape[:-1]
         features = self.project(z)
         flat_features = features.reshape(
             -1, self.in_channels, self.feature_size, self.feature_size
         )
         flat_features = torch.relu(self.project_norm(flat_features))
-        reconstruction = self.deconv(flat_features)
-        return reconstruction.reshape(*batch_shape, *reconstruction.shape[1:])
+        logits = self.deconv(flat_features)[..., self._crop, self._crop]
+        return logits.reshape(*batch_shape, *logits.shape[1:])

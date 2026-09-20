@@ -11,6 +11,8 @@ diagonal-Gaussian posterior, a standard-normal prior, and a closed-form KL
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
@@ -39,6 +41,9 @@ class ConvGaussianVAEConfig(BaseModel):
             likelihood's standard deviation. It is learned (one scalar shared by
             all pixels, parameterized by log sigma^2), so this only sets where
             training starts.
+        likelihood: ``"gaussian"`` (learned sigma) or ``"bernoulli"`` (binarized
+            images; the decoder logits are the Bernoulli parameters and
+            ``likelihood_scale`` is unused).
         num_elbo_samples: Number of z ~ q(z|x) draws averaged for the
             reconstruction term (the KL is closed-form, so it needs none).
     """
@@ -48,6 +53,7 @@ class ConvGaussianVAEConfig(BaseModel):
     hidden_channels: int = 32
     latent_dim: int = 8
     likelihood_scale: float = 1.0
+    likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
 
 
@@ -95,12 +101,14 @@ class ConvGaussianVAE(nn.Module):
         z = posterior.rsample()
         return self.decoder(z), posterior, z
 
-    def training_step(self, batch: Tensor) -> dict[str, Tensor]:
+    def training_step(self, batch: Tensor, kl_weight: float = 1.0) -> dict[str, Tensor]:
         """Computes the negative ELBO (closed-form KL) for one batch.
 
         Args:
             batch: Input images, shape ``(batch, image_channels,
                 image_size, image_size)``.
+            kl_weight: Multiplier on the KL term in the returned loss (for KL
+                warm-up). ``"kl"`` and ``"log_likelihood"`` are unweighted.
 
         Returns:
             A dict with ``"loss"`` (the mean negative ELBO), ``"log_likelihood"``,
@@ -114,13 +122,16 @@ class ConvGaussianVAE(nn.Module):
             batch,
             posterior,
             prior,
-            self.decoder,
+            self._decode_for_likelihood,
             scale,
             self.config.num_elbo_samples,
             analytic_kl=True,
+            likelihood=self.config.likelihood,
         )
         return {
-            "loss": -elbo_terms["elbo"].mean(),
+            "loss": -(
+                elbo_terms["log_likelihood"] - kl_weight * elbo_terms["kl"]
+            ).mean(),
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
             "likelihood_scale": torch.as_tensor(scale).detach(),
@@ -151,3 +162,9 @@ class ConvGaussianVAE(nn.Module):
         mu, log_var = self.posterior_head(self.encoder(x)).chunk(2, dim=-1)
         log_var = log_var.clamp(-_LOG_VAR_BOUND, _LOG_VAR_BOUND)
         return mu, torch.exp(0.5 * log_var)
+
+    def _decode_for_likelihood(self, z: Tensor) -> Tensor:
+        """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""
+        if self.config.likelihood == "bernoulli":
+            return self.decoder.logits(z)
+        return self.decoder(z)

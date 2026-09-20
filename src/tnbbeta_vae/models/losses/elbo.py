@@ -30,10 +30,11 @@ reconstruction term is still a Monte Carlo average either way.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch.distributions import Normal, kl_divergence
+from torch.nn.functional import binary_cross_entropy_with_logits
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -52,13 +53,14 @@ def monte_carlo_elbo(
     likelihood_scale: float | Tensor = 1.0,
     num_samples: int = 1,
     analytic_kl: bool = False,
+    likelihood: Literal["gaussian", "bernoulli"] = "gaussian",
 ) -> dict[str, Tensor]:
     """Computes a Monte Carlo ELBO for one batch, averaged over `num_samples` draws.
 
-    The reconstruction likelihood is a fixed-scale Gaussian over pixels
-    (equivalent to MSE up to an additive constant) -- the simplest choice
-    that keeps this function decoder-agnostic; swap in a different
-    likelihood by not using this function for that term.
+    The reconstruction likelihood is a Gaussian over pixels with standard
+    deviation ``likelihood_scale`` (equivalent to MSE up to an additive
+    constant), or, with ``likelihood="bernoulli"``, a Bernoulli over pixels
+    (for binarized images such as MNIST).
 
     Args:
         x: Target images, shape ``(batch, *event_shape)``.
@@ -67,9 +69,11 @@ def monte_carlo_elbo(
             output.
         decoder: Maps a latent sample (shape ``(batch,
             *posterior.event_shape)``) to a reconstruction, same shape as
-            ``x``.
+            ``x``: the Gaussian mean, or, for ``likelihood="bernoulli"``, the
+            pixel *logits* (before the sigmoid).
         likelihood_scale: Standard deviation of the Gaussian reconstruction
             likelihood. A tensor (e.g. a learned scale) receives gradients.
+            Ignored for ``likelihood="bernoulli"``.
         num_samples: Number of independent ``z ~ q(z|x)`` draws to average
             over. More samples lower the estimator's variance (including
             the KL term's, when it's Monte Carlo) at the cost of that many
@@ -79,6 +83,7 @@ def monte_carlo_elbo(
             of estimating it from samples. Raises ``NotImplementedError``
             for distribution pairs with no registered closed form (e.g.
             any pair involving ``TNBBetaSpherical``).
+        likelihood: ``"gaussian"`` or ``"bernoulli"``; see above.
 
     Returns:
         A dict with per-example (shape ``(batch,)``) tensors, each
@@ -94,7 +99,12 @@ def monte_carlo_elbo(
         z = posterior.rsample()
         reconstruction = decoder(z)
 
-        log_likelihood = Normal(reconstruction, likelihood_scale).log_prob(x)
+        if likelihood == "bernoulli":
+            log_likelihood = -binary_cross_entropy_with_logits(
+                reconstruction, x, reduction="none"
+            )
+        else:
+            log_likelihood = Normal(reconstruction, likelihood_scale).log_prob(x)
         log_likelihoods.append(log_likelihood.flatten(1).sum(-1))
         if exact_kl is None:
             kls.append(posterior.log_prob(z) - prior.log_prob(z))
