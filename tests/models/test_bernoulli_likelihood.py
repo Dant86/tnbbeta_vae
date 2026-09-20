@@ -11,6 +11,8 @@ from tnbbeta_vae.models import (
     ConvGaussianVAEConfig,
     ConvTNBBetaSphericalVAE,
     ConvTNBBetaSphericalVAEConfig,
+    ConvVonMisesFisherVAE,
+    ConvVonMisesFisherVAEConfig,
 )
 from tnbbeta_vae.models.losses import monte_carlo_elbo
 
@@ -26,6 +28,7 @@ def _models() -> list[torch.nn.Module]:
     return [
         ConvGaussianVAE(ConvGaussianVAEConfig(**common)),
         ConvTNBBetaSphericalVAE(ConvTNBBetaSphericalVAEConfig(**common)),
+        ConvVonMisesFisherVAE(ConvVonMisesFisherVAEConfig(**common)),
     ]
 
 
