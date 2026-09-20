@@ -1,10 +1,18 @@
-"""CLI entrypoint for training a registered model on CIFAR-10.
+"""CLI entrypoint for training a registered model on CIFAR-10 or MNIST.
 
 Usage:
     uv run python -m apps.train.main --list
     uv run python -m apps.train.main --model <name> [--set key=value ...] \
-        [--epochs N] [--batch-size N] [--lr X] [--seed N] \
+        [--dataset cifar10|mnist] [--epochs N] [--batch-size N] [--lr X] \
+        [--seed N] [--patience N] [--kl-warmup-epochs N] \
         [--run-name NAME [--resume]]
+
+``--dataset mnist`` trains on dynamically binarized MNIST (50k train images),
+validates on the 10k validation images after every epoch, keeps the best
+validation epoch as ``final.pt``, and sets the model's ``image_channels=1``,
+``image_size=28`` and ``likelihood=bernoulli`` unless ``--set`` overrides them.
+The S-VAE paper's protocol is ``--batch-size 64 --epochs 1000 --patience 50
+--kl-warmup-epochs 100``.
 
 Data, checkpoint and run-log locations come from ``.env`` (see
 ``.env.sample``). With ``--run-name``, checkpoints go to
@@ -26,6 +34,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.cifar10 import load_cifar10
+from tnbbeta_vae.data.mnist import load_mnist
 import tnbbeta_vae.models  # noqa: F401 -- import for its @register_model side effects
 from tnbbeta_vae.paths import checkpoint_dir, data_dir, runs_dir
 from tnbbeta_vae.registry import (
@@ -43,6 +52,12 @@ if TYPE_CHECKING:
 _SLURM_GPU_VARIABLES = ("SLURM_JOB_GPUS", "SLURM_GPUS_ON_NODE", "SLURM_STEP_GPUS")
 # EX_TEMPFAIL: scripts/slurm/train.sbatch resubmits the job on this exit code.
 NO_GPU_EXIT_CODE = 75
+_MNIST_MODEL_DEFAULTS = {
+    "image_channels": "1",
+    "image_size": "28",
+    "likelihood": "bernoulli",
+}
+_VAL_BATCH_SIZE = 1000
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -63,10 +78,23 @@ def main(argv: list[str] | None = None) -> None:
         metavar="key=value",
         help="Model config override, may be repeated.",
     )
+    parser.add_argument("--dataset", choices=["cifar10", "mnist"], default="cifar10")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=None,
+        help="MNIST: stop after this many epochs without a better validation loss.",
+    )
+    parser.add_argument(
+        "--kl-warmup-epochs",
+        type=int,
+        default=0,
+        help="Raise the KL weight linearly from 0 to 1 over this many epochs.",
+    )
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument(
         "--device", type=str, default=None, help="Default: cuda if available."
@@ -93,7 +121,11 @@ def main(argv: list[str] | None = None) -> None:
     if args.resume and not args.run_name:
         parser.error("--resume requires --run-name.")
 
+    if args.dataset == "cifar10" and args.patience is not None:
+        parser.error("--patience needs a validation set; use --dataset mnist.")
     overrides = _parse_overrides(args.set)
+    if args.dataset == "mnist":
+        overrides = {**_MNIST_MODEL_DEFAULTS, **overrides}
 
     checkpoints = checkpoint_dir() / args.run_name if args.run_name else None
     if args.resume and checkpoints and (checkpoints / "final.pt").exists():
@@ -121,16 +153,16 @@ def main(argv: list[str] | None = None) -> None:
     (trainer.run_logger.run_dir / "train_args.json").write_text(
         json.dumps(vars(args), indent=2)
     )
-    loader = DataLoader(
-        load_cifar10(data_dir(), train=True),
-        batch_size=args.batch_size,
-        shuffle=True,
-        drop_last=True,
-        num_workers=args.num_workers,
-        pin_memory=device.type == "cuda",
-    )
+    loader, val_loader = _dataloaders(args, device)
     print(f"Training {args.model} on {device}; checkpoints in {checkpoints}.")
-    trainer.fit(_OnDevice(loader, device), args.epochs, checkpoint_dir=checkpoints)
+    trainer.fit(
+        _OnDevice(loader, device),
+        args.epochs,
+        checkpoint_dir=checkpoints,
+        val_dataloader=None if val_loader is None else _OnDevice(val_loader, device),
+        patience=args.patience,
+        kl_warmup_epochs=args.kl_warmup_epochs,
+    )
 
 
 class _OnDevice:
@@ -143,6 +175,31 @@ class _OnDevice:
     def __iter__(self) -> Iterator[Tensor]:
         for batch in self._loader:
             yield batch.to(self._device, non_blocking=True)
+
+
+def _dataloaders(
+    args: argparse.Namespace, device: torch.device
+) -> tuple[DataLoader, DataLoader | None]:
+    """Builds the train loader and, for MNIST, the validation loader."""
+    if args.dataset == "mnist":
+        train_set = load_mnist(data_dir(), split="train")
+        val_loader = DataLoader(
+            load_mnist(data_dir(), split="val"),
+            batch_size=_VAL_BATCH_SIZE,
+            num_workers=args.num_workers,
+        )
+    else:
+        train_set = load_cifar10(data_dir(), train=True)
+        val_loader = None
+    train_loader = DataLoader(
+        train_set,
+        batch_size=args.batch_size,
+        shuffle=True,
+        drop_last=True,
+        num_workers=args.num_workers,
+        pin_memory=device.type == "cuda",
+    )
+    return train_loader, val_loader
 
 
 def _select_device(requested: str | None) -> torch.device:
