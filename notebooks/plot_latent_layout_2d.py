@@ -1,4 +1,4 @@
-"""Renders class layouts from a 2-D or 3-D latent export (apps/eval/export_latents.py).
+"""Renders class layouts from a 2-D latent export (apps/eval/export_latents.py).
 
 Usage:
     uv run python notebooks/plot_latent_layout_2d.py --npz latents_final_test.npz \
@@ -9,9 +9,7 @@ Pure NumPy (no plotting dependency). Class colors, in CIFAR-10 label order:
 8 ship, 9 truck. The legend image shows the color of each class as a row of
 swatches in that order.
 
-TNBBeta at latent_dim=3 (the sphere S^2): orthographic views of the sphere from
-four azimuths, plus a longitude/latitude map, using the export's
-``mode_direction`` (which undoes the antipodal alias), and per-class summaries.
+For latent_dim=3 use notebooks/plot_sphere_3d.py (interactive).
 
 Gaussian (plane): scatter of the posterior means and of posterior samples.
 TNBBeta (circle): points on the unit circle at the angle of the mean
@@ -105,32 +103,6 @@ def resultant_length(angle: np.ndarray) -> float:
     return float(np.hypot(np.cos(angle).mean(), np.sin(angle).mean()))
 
 
-def sphere_views(points: np.ndarray, labels: np.ndarray, out_dir: Path, tag: str) -> None:
-    """Writes orthographic views of unit vectors (front hemisphere only) and a lon/lat map."""
-    elev = np.radians(20.0)
-    tilt = np.array([[1, 0, 0], [0, np.cos(elev), -np.sin(elev)], [0, np.sin(elev), np.cos(elev)]])
-    for azim_deg in (0, 90, 180, 270):
-        a = np.radians(azim_deg)
-        spin = np.array([[np.cos(a), -np.sin(a), 0], [np.sin(a), np.cos(a), 0], [0, 0, 1]])
-        rotated = points @ (tilt @ spin).T
-        front = rotated[:, 0] > 0  # camera on +x looking at the origin
-        canvas = scatter(rotated[front][:, [1, 2]], labels[front], 1.1)
-        write_png(out_dir / f"{tag}_sphere_azim{azim_deg}.png", outline(canvas, 1.1))
-    lon = np.arctan2(points[:, 1], points[:, 0]) / np.pi
-    lat = np.arcsin(np.clip(points[:, 2], -1, 1)) / (np.pi / 2)
-    write_png(out_dir / f"{tag}_lonlat.png", scatter(np.stack([lon, lat], axis=1), labels, 1.05))
-
-
-def outline(canvas: np.ndarray, extent: float) -> np.ndarray:
-    """Draws the unit circle (the sphere's silhouette) in light gray."""
-    scale = (SIZE - 1) / (2 * extent)
-    theta = np.linspace(0, 2 * np.pi, 4000)
-    cols = ((np.cos(theta) + extent) * scale).astype(int)
-    rows = ((extent - np.sin(theta)) * scale).astype(int)
-    canvas[np.clip(rows, 0, SIZE - 1), np.clip(cols, 0, SIZE - 1)] = (170, 170, 170)
-    return canvas
-
-
 def main() -> None:
     """Loads an export and writes the layout images and a text summary."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -146,8 +118,8 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(0)
     dim = data["direction"].shape[1]
-    if dim not in (2, 3):
-        raise SystemExit("This script is for latent_dim 2 or 3.")
+    if dim != 2:
+        raise SystemExit("This script is for latent_dim 2; see plot_sphere_3d.py for 3.")
 
     write_png(args.out_dir / "legend.png", legend())
     print("class order:", ", ".join(f"{k}={name}" for k, name in enumerate(CLASSES)))
@@ -164,22 +136,6 @@ def main() -> None:
             m = mu[labels == k]
             print(f"  {k} {CLASSES[k]:10s} centroid=({m[:, 0].mean():6.2f},{m[:, 1].mean():6.2f}) "
                   f"spread={m.std(axis=0).mean():.2f} sigma={data['concentration'][labels == k].mean():.3f}")  # fmt: skip
-        return
-
-    if dim == 3:
-        if kind == "conv_gaussian_vae":
-            raise SystemExit("3-D layouts are implemented for the sphere (TNBBeta) only.")
-        mode = data["mode_direction"] if "mode_direction" in data.files else data["direction"]
-        sphere_views(mode, labels, args.out_dir, tag)
-        centroid = np.stack([mode[labels == k].mean(axis=0) for k in range(10)])
-        angle = np.degrees(np.arccos(np.clip((mode * data["z"]).sum(1), -1, 1)))
-        print(f"angle between z and the mode direction (deg): median {np.median(angle):.2f}, "
-              f"p90 {np.percentile(angle, 90):.2f}")  # fmt: skip
-        print("class  name        R (spread on sphere)  mean p   mean q  mean eps  mean KL")
-        for k in range(10):
-            sel = labels == k
-            print(f"  {k}    {CLASSES[k]:10s} {np.linalg.norm(centroid[k]):12.3f}       {data['p'][sel].mean():6.3f}  "
-                  f"{data['q'][sel].mean():6.3f}  {data['epsilon'][sel].mean():8.2f}  {data['kl'][sel].mean():7.2f}")  # fmt: skip
         return
 
     phi_mu = np.arctan2(data["direction"][:, 1], data["direction"][:, 0])
