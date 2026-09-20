@@ -149,6 +149,7 @@ def test_export_latents_writes_parameters_labels_and_probe(
     assert ("p" in latents.files) == is_tnbbeta
     probe = json.loads((run_checkpoints / "latent_probe_final_test.json").read_text())
     assert set(probe) >= {"direction", "z_sample", "direction_cosine", "z_cosine"}
+    assert set(probe) >= {"linear_direction", "linear_z_sample"}
     if is_tnbbeta:
         mode = latents["mode_direction"]
         flips = np.where(latents["p"][:, None] > 0.5, 1.0, -1.0)

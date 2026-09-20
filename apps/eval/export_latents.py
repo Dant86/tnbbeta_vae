@@ -21,7 +21,8 @@ with, per image and in dataset order:
 
 It also writes ``latent_probe_<checkpoint>_<split>.json`` with the accuracy of
 a k-nearest-neighbour class probe on several features, as a rough measure of
-how much class structure the posterior carries. Use the ``*_cosine`` entries
+how much class structure the posterior carries; the ``linear_*`` entries are
+softmax-regression accuracies on standardized features. Use the ``*_cosine`` entries
 to compare models: raw Euclidean distance penalizes latents whose vector
 lengths vary (e.g. Gaussian means), which unit-length sphere directions avoid.
 """
@@ -43,6 +44,8 @@ from tnbbeta_vae.training import load_model_checkpoint
 
 _KL_SAMPLES = 16
 _PROBE_NEIGHBOURS = 10
+_NUM_CLASSES = 10
+_LINEAR_PROBE_STEPS = 300
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -140,10 +143,26 @@ def _probe_accuracies(arrays: dict[str, np.ndarray]) -> dict[str, float]:
             [arrays["direction"], arrays["p"][:, None]], axis=1
         )
     half = len(labels) // 2
-    return {
+    accuracies = {
         name: _knn_accuracy(torch.as_tensor(value), labels, half)
         for name, value in features.items()
     }
+    linear_features = {
+        "linear_direction": arrays["direction"],
+        "linear_z_sample": arrays["z"],
+        **(
+            {"linear_direction_and_p": features["direction_and_p"]}
+            if "direction_and_p" in features
+            else {}
+        ),
+    }
+    accuracies.update(
+        {
+            name: _linear_accuracy(torch.as_tensor(value), labels, half)
+            for name, value in linear_features.items()
+        }
+    )
+    return accuracies
 
 
 def _normalized(features: np.ndarray) -> np.ndarray:
@@ -157,6 +176,24 @@ def _knn_accuracy(features: torch.Tensor, labels: torch.Tensor, split: int) -> f
     nearest = torch.cdist(test, train).topk(neighbours, largest=False).indices
     votes = torch.mode(labels[:split][nearest], dim=1).values
     return (votes == labels[split:]).float().mean().item()
+
+
+def _linear_accuracy(features: torch.Tensor, labels: torch.Tensor, split: int) -> float:
+    """Softmax-regression accuracy, fit on rows before ``split``, tested after."""
+    train, test = features[:split].float(), features[split:].float()
+    mean, std = train.mean(dim=0), train.std(dim=0).clamp_min(1e-6)
+    train, test = (train - mean) / std, (test - mean) / std
+    classifier = torch.nn.Linear(train.shape[1], _NUM_CLASSES)
+    optimizer = torch.optim.Adam(classifier.parameters(), lr=0.05, weight_decay=1e-4)
+    with torch.enable_grad():
+        for _ in range(_LINEAR_PROBE_STEPS):
+            optimizer.zero_grad()
+            loss = torch.nn.functional.cross_entropy(classifier(train), labels[:split])
+            loss.backward()
+            optimizer.step()
+    with torch.no_grad():
+        predictions = classifier(test).argmax(dim=1)
+    return (predictions == labels[split:]).float().mean().item()
 
 
 if __name__ == "__main__":
