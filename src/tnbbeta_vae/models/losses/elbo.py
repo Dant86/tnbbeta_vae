@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch import Tensor
     from torch.distributions import Distribution
 
-__all__ = ["monte_carlo_elbo"]
+__all__ = ["monte_carlo_elbo", "pixel_log_likelihood"]
 
 
 def monte_carlo_elbo(
@@ -99,13 +99,9 @@ def monte_carlo_elbo(
         z = posterior.rsample()
         reconstruction = decoder(z)
 
-        if likelihood == "bernoulli":
-            log_likelihood = -binary_cross_entropy_with_logits(
-                reconstruction, x, reduction="none"
-            )
-        else:
-            log_likelihood = Normal(reconstruction, likelihood_scale).log_prob(x)
-        log_likelihoods.append(log_likelihood.flatten(1).sum(-1))
+        log_likelihoods.append(
+            pixel_log_likelihood(x, reconstruction, likelihood, likelihood_scale)
+        )
         if exact_kl is None:
             kls.append(posterior.log_prob(z) - prior.log_prob(z))
 
@@ -117,3 +113,32 @@ def monte_carlo_elbo(
         "log_likelihood": log_likelihood,
         "kl": kl,
     }
+
+
+def pixel_log_likelihood(
+    x: Tensor,
+    reconstruction: Tensor,
+    likelihood: Literal["gaussian", "bernoulli"],
+    likelihood_scale: float | Tensor = 1.0,
+) -> Tensor:
+    """Returns ``log p(x | z)`` summed over the image dimensions.
+
+    Args:
+        x: Target images, shape ``(batch, channels, height, width)``.
+        reconstruction: Decoder output for ``x``, with any leading sample
+            dimensions in front of ``x``'s shape (e.g. ``(samples, batch, ...)``):
+            the Gaussian mean, or the pixel logits for ``"bernoulli"``.
+        likelihood: ``"gaussian"`` or ``"bernoulli"``.
+        likelihood_scale: Standard deviation of the Gaussian likelihood;
+            ignored for ``"bernoulli"``.
+
+    Returns:
+        Tensor of shape ``reconstruction.shape[:-3]``.
+    """
+    if likelihood == "bernoulli":
+        per_pixel = -binary_cross_entropy_with_logits(
+            reconstruction, x.expand_as(reconstruction), reduction="none"
+        )
+    else:
+        per_pixel = Normal(reconstruction, likelihood_scale).log_prob(x)
+    return per_pixel.sum(dim=(-3, -2, -1))

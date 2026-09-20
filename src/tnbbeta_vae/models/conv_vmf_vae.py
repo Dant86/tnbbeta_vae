@@ -19,7 +19,7 @@ from torch import Tensor, nn
 
 from tnbbeta_vae.distributions import HypersphericalUniform, VonMisesFisher
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
-from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
+from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
 
@@ -141,6 +141,29 @@ class ConvVonMisesFisherVAE(nn.Module):
             "likelihood_scale": torch.as_tensor(scale).detach(),
             "posterior_kappa_mean": posterior.scale.mean().detach(),
         }
+
+    def posterior_and_prior(
+        self, x: Tensor
+    ) -> tuple[VonMisesFisher, HypersphericalUniform]:
+        """Returns ``q(z|x)`` and the uniform-sphere prior for a batch of images."""
+        return self._encode(x), self.prior()
+
+    def log_likelihood(self, x: Tensor, z: Tensor) -> Tensor:
+        """Returns ``log p(x|z)`` summed over pixels.
+
+        Args:
+            x: Images, shape ``(batch, channels, height, width)``.
+            z: Latents, shape ``(*samples, batch, latent_dim)``.
+
+        Returns:
+            Tensor of shape ``(*samples, batch)``.
+        """
+        return pixel_log_likelihood(
+            x,
+            self._decode_for_likelihood(z),
+            self.config.likelihood,
+            self.learned_scale(),
+        )
 
     @torch.no_grad()
     def generate(self, num_samples: int) -> Tensor:
