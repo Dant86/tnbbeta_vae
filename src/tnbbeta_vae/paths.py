@@ -18,7 +18,7 @@ from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
-__all__ = ["checkpoint_dir", "data_dir", "runs_dir"]
+__all__ = ["checkpoint_dir", "data_dir", "runs_dir", "torch_hub_dir"]
 
 _DEFAULTS = {
     "TNBBETA_DATA_DIR": "data",
@@ -40,6 +40,11 @@ def checkpoint_dir() -> Path:
 def runs_dir() -> Path:
     """Returns the run-log directory (``TNBBETA_RUNS_DIR``)."""
     return _path("TNBBETA_RUNS_DIR")
+
+
+def torch_hub_dir() -> Path:
+    """Returns where pretrained weights are cached: ``<TNBBETA_DATA_DIR>/torch_hub``."""
+    return data_dir() / "torch_hub"
 
 
 def _path(name: str) -> Path:
