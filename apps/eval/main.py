@@ -10,7 +10,10 @@ Reads ``$TNBBETA_CHECKPOINT_DIR/<run-name>/<checkpoint>.pt`` and the data in
 * ``eval_<checkpoint>_<split>.json``: ELBO, log-likelihood, KL (nats per
   image), reconstruction MSE/PSNR, and the prior-sample nearest-neighbour
   score (see below).
-* ``prior_samples_<checkpoint>.png`` and ``reconstructions_<checkpoint>.png``.
+* ``prior_samples_<checkpoint>.png`` (64 prior samples) and
+  ``reconstructions_<checkpoint>_<split>.png`` (32 images of the split, then their
+  reconstructions), both enlarged 4x with nearest-neighbour so they are easier to
+  inspect. The split is in the name so train and test grids do not overwrite each other.
 
 The nearest-neighbour score is the mean per-pixel squared distance from
 each prior sample to its nearest training image, divided by the same
@@ -40,6 +43,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 _NN_CHUNK = 256
+_IMAGE_SCALE = 4
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -96,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
         **_elbo_metrics(model, loader, device),
         **_prior_metrics(model, args, device),
     }
-    _save_images(model, loader, run_dir, args.checkpoint, device)
+    _save_images(model, loader, run_dir, args.checkpoint, args.split, device)
 
     output = run_dir / f"eval_{args.checkpoint}_{args.split}.json"
     output.write_text(json.dumps(results, indent=2))
@@ -161,17 +165,26 @@ def _nearest_neighbour_mse(queries: Tensor, reference: Tensor) -> float:
 
 @torch.no_grad()
 def _save_images(
-    model: Any, loader: DataLoader, run_dir: Path, tag: str, device: torch.device
+    model: Any,
+    loader: DataLoader,
+    run_dir: Path,
+    tag: str,
+    split: str,
+    device: torch.device,
 ) -> None:
     generated = cast("Tensor", model.generate(64))
-    save_image(generated, run_dir / f"prior_samples_{tag}.png", nrow=8)
+    save_image(_enlarged(generated), run_dir / f"prior_samples_{tag}.png", nrow=8)
     batch = next(iter(loader)).to(device)[:32]
     reconstruction = model(batch)[0]
     save_image(
-        torch.cat([batch, reconstruction]),
-        run_dir / f"reconstructions_{tag}.png",
+        _enlarged(torch.cat([batch, reconstruction])),
+        run_dir / f"reconstructions_{tag}_{split}.png",
         nrow=8,
     )
+
+
+def _enlarged(images: Tensor) -> Tensor:
+    return torch.nn.functional.interpolate(images, scale_factor=_IMAGE_SCALE)
 
 
 if __name__ == "__main__":
