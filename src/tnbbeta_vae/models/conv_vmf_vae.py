@@ -1,11 +1,12 @@
-"""A simple convolutional VAE with a TNBBetaSpherical latent posterior/prior.
+"""A convolutional VAE with a von Mises-Fisher latent posterior (S-VAE).
 
-Wires together :mod:`tnbbeta_vae.models.architectures.conv`,
-:mod:`tnbbeta_vae.models.priors.tnbbeta_spherical`, and
-:mod:`tnbbeta_vae.models.losses.elbo` into a single registrable model, so
-this is the first concrete, trainable instance of the project's actual
-research target: a VAE whose latent space is the unit hypersphere under
-TNBbeta, rather than the usual Gaussian.
+The standard hyperspherical baseline for
+:class:`~tnbbeta_vae.models.conv_vae.ConvTNBBetaSphericalVAE`: same
+encoder/decoder, uniform-on-the-sphere prior. The latent parameterization
+follows the reference S-VAE example (Davidson et al., 2018): a normalized
+mean direction and ``kappa = softplus(.) + 1``, with the analytic KL to the
+uniform distribution. Comparing the two models separates "does the sphere
+itself help?" from "does TNBbeta's extra flexibility help?".
 """
 
 from __future__ import annotations
@@ -16,37 +17,25 @@ from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
 
-from tnbbeta_vae.distributions import TNBBetaSpherical
+from tnbbeta_vae.distributions import HypersphericalUniform, VonMisesFisher
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
-from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
-from tnbbeta_vae.models.priors.tnbbeta_spherical import (
-    FixedTNBBetaSphericalPrior,
-    uniform_prior_params,
-)
 from tnbbeta_vae.registry import register_model
 
-__all__ = ["ConvTNBBetaSphericalVAE", "ConvTNBBetaSphericalVAEConfig"]
-
-_PARAM_EPS = 1e-4
-# Bounds for the posterior's p and q. A clamped value passes no gradient; 1e-6 keeps
-# the bound off the fitted values (at 1e-4, p sat exactly on it at latent_dim=2) while
-# staying above what float32 can resolve near 1 (about 1e-7).
-_PQ_CLAMP = 1e-6
+__all__ = ["ConvVonMisesFisherVAE", "ConvVonMisesFisherVAEConfig"]
 
 
-class ConvTNBBetaSphericalVAEConfig(BaseModel):
-    """Hyperparameters for :class:`ConvTNBBetaSphericalVAE`.
+class ConvVonMisesFisherVAEConfig(BaseModel):
+    """Hyperparameters for :class:`ConvVonMisesFisherVAE`.
 
     Attributes:
         image_channels: Number of image channels (3 for RGB).
         image_size: Height/width of the (square) input image; must be
-            divisible by 8. Defaults to CIFAR-10's 32.
+            divisible by 8.
         hidden_channels: Base conv channel width.
         latent_dim: Ambient dimension of the latent sphere S^(latent_dim
-            - 1). Kept small by default so the latent space stays cheap to
-            inspect/visualize while getting the pipeline working.
+            - 1).
         likelihood_scale: Starting value of the Gaussian reconstruction
             likelihood's standard deviation. It is learned (one scalar shared by
             all pixels, parameterized by log sigma^2), so this only sets where
@@ -55,9 +44,8 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
             images; the decoder logits are the Bernoulli parameters and
             ``likelihood_scale`` is unused).
         num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
-            estimate. Higher values lower variance (there's no
-            closed-form KL to fall back on here) at the cost of that many
-            extra decoder calls per training step.
+            estimate (the KL is exact, so this only affects the
+            likelihood term).
     """
 
     image_channels: int = 3
@@ -69,15 +57,19 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     num_elbo_samples: int = 1
 
 
-@register_model("conv_tnbbeta_spherical_vae", config_cls=ConvTNBBetaSphericalVAEConfig)
-class ConvTNBBetaSphericalVAE(nn.Module):
-    """A conv encoder/decoder VAE with a TNBBetaSpherical latent distribution."""
+@register_model("conv_vmf_vae", config_cls=ConvVonMisesFisherVAEConfig)
+class ConvVonMisesFisherVAE(nn.Module):
+    """A conv encoder/decoder VAE with a von Mises-Fisher posterior.
 
-    def __init__(self, config: ConvTNBBetaSphericalVAEConfig) -> None:
+    The prior is uniform on the sphere, so it needs no parameters; the KL to
+    it is analytic.
+    """
+
+    def __init__(self, config: ConvVonMisesFisherVAEConfig) -> None:
         """Initializes the model from ``config``.
 
         Args:
-            config: Hyperparameters; see :class:`ConvTNBBetaSphericalVAEConfig`.
+            config: Hyperparameters; see :class:`ConvVonMisesFisherVAEConfig`.
         """
         super().__init__()
         self.config = config
@@ -85,9 +77,8 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         self.encoder = ConvEncoder(
             config.image_channels, config.image_size, config.hidden_channels
         )
-        self.posterior_head = nn.Linear(
-            self.encoder.out_features, config.latent_dim + 3
-        )
+        self.fc_mean = nn.Linear(self.encoder.out_features, config.latent_dim)
+        self.fc_var = nn.Linear(self.encoder.out_features, 1)
         self.decoder = ConvDecoder(
             config.latent_dim,
             config.image_channels,
@@ -95,11 +86,14 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             config.hidden_channels,
         )
         self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
-        self.prior = FixedTNBBetaSphericalPrior(
-            config.latent_dim, *uniform_prior_params(config.latent_dim)
+
+    def prior(self) -> HypersphericalUniform:
+        """Builds the uniform-on-the-sphere prior."""
+        return HypersphericalUniform(
+            self.config.latent_dim - 1, device=self.fc_mean.weight.device
         )
 
-    def forward(self, x: Tensor) -> tuple[Tensor, TNBBetaSpherical, Tensor]:
+    def forward(self, x: Tensor) -> tuple[Tensor, VonMisesFisher, Tensor]:
         """Runs a full encode -> sample -> decode pass.
 
         Args:
@@ -107,17 +101,14 @@ class ConvTNBBetaSphericalVAE(nn.Module):
                 image_size)``.
 
         Returns:
-            A tuple ``(reconstruction, posterior, z)``: the decoded image
-            mean, the ``q(z|x)`` distribution, and the reparameterized
-            latent sample drawn from it.
+            A tuple ``(reconstruction, posterior, z)``.
         """
         posterior = self._encode(x)
         z = posterior.rsample()
-        reconstruction = self.decoder(z)
-        return reconstruction, posterior, z
+        return self.decoder(z), posterior, z
 
     def training_step(self, batch: Tensor, kl_weight: float = 1.0) -> dict[str, Tensor]:
-        """Computes the negative ELBO loss for one batch.
+        """Computes the negative ELBO (analytic KL) for one batch.
 
         Args:
             batch: Input images, shape ``(batch, image_channels,
@@ -126,22 +117,19 @@ class ConvTNBBetaSphericalVAE(nn.Module):
                 warm-up). ``"kl"`` and ``"log_likelihood"`` are unweighted.
 
         Returns:
-            A dict with ``"loss"`` (the mean negative ELBO), plus
-            ``"log_likelihood"``, ``"kl"``, and posterior-collapse
-            diagnostics (see
-            :func:`tnbbeta_vae.models.diagnostics.tnbbeta_spherical_posterior_diagnostics`)
-            for logging.
+            A dict with ``"loss"``, ``"log_likelihood"``, ``"kl"``,
+            ``"likelihood_scale"`` and ``"posterior_kappa_mean"``.
         """
         scale = self.learned_scale()
         posterior = self._encode(batch)
-        prior = self.prior()
         elbo_terms = monte_carlo_elbo(
             batch,
             posterior,
-            prior,
+            self.prior(),
             self._decode_for_likelihood,
             scale,
             self.config.num_elbo_samples,
+            analytic_kl=True,
             likelihood=self.config.likelihood,
         )
         return {
@@ -151,12 +139,12 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
             "likelihood_scale": torch.as_tensor(scale).detach(),
-            **tnbbeta_spherical_posterior_diagnostics(posterior),
+            "posterior_kappa_mean": posterior.scale.mean().detach(),
         }
 
     def posterior_and_prior(
         self, x: Tensor
-    ) -> tuple[TNBBetaSpherical, TNBBetaSpherical]:
+    ) -> tuple[VonMisesFisher, HypersphericalUniform]:
         """Returns ``q(z|x)`` and the uniform-sphere prior for a batch of images."""
         return self._encode(x), self.prior()
 
@@ -179,7 +167,7 @@ class ConvTNBBetaSphericalVAE(nn.Module):
 
     @torch.no_grad()
     def generate(self, num_samples: int) -> Tensor:
-        """Decodes ``num_samples`` draws from the model's fixed prior.
+        """Decodes ``num_samples`` draws from the uniform prior.
 
         Args:
             num_samples: Number of images to generate.
@@ -190,21 +178,13 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         """
         return self.decoder(self.prior().sample(torch.Size([num_samples])))
 
-    def _encode(self, x: Tensor) -> TNBBetaSpherical:
-        """Maps images to a per-example TNBBetaSpherical posterior."""
+    def _encode(self, x: Tensor) -> VonMisesFisher:
+        """Maps images to a per-example von Mises-Fisher posterior."""
         features = self.encoder(x)
-        raw_direction, raw_p, raw_q, raw_epsilon = self.posterior_head(features).split(
-            [self.config.latent_dim, 1, 1, 1], dim=-1
-        )
-
-        mean_direction = raw_direction / raw_direction.norm(
-            dim=-1, keepdim=True
-        ).clamp_min(_PARAM_EPS)
-        p = torch.sigmoid(raw_p.squeeze(-1)).clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
-        q = torch.sigmoid(raw_q.squeeze(-1)).clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
-        epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
-
-        return TNBBetaSpherical(mean_direction, p, q, epsilon)
+        z_mean = self.fc_mean(features)
+        z_mean = z_mean / z_mean.norm(dim=-1, keepdim=True)
+        z_var = nn.functional.softplus(self.fc_var(features)) + 1
+        return VonMisesFisher(z_mean, z_var)
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:
         """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""

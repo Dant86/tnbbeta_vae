@@ -59,9 +59,17 @@ automatically on commit, excluding `notebooks/`.
   (closed-form KL via `monte_carlo_elbo(..., analytic_kl=True)`) for
   separating latent-family effects from architecture/data effects.
   The TNBBeta prior is always Uniform(sphere), derived from `latent_dim`.
-  The S-VAE vMF baseline was removed; it is archived at the git tag
-  `vmf-baseline-archive`.
-- The likelihood scale sigma is always learned (`LearnedLikelihoodScale`, log
+  `conv_vmf_vae.py`'s `ConvVonMisesFisherVAE` (the S-VAE baseline, analytic KL to the
+  uniform sphere) was restored from the git tag `vmf-baseline-archive` for the MNIST
+  reproduction of the S-VAE paper (Davidson et al. 2018); it is otherwise a baseline,
+  not a place for new knobs. All three conv VAEs share `posterior_and_prior` and
+  `log_likelihood`, which `models/losses/importance_weighted.py` uses to compute the
+  paper's Table 1 metrics.
+- MNIST (`--dataset mnist`) uses a Bernoulli likelihood on dynamically binarized images
+  (`likelihood="bernoulli"`, set automatically), 28x28 padded to 32 inside the conv
+  encoder/decoder, a 50k/10k train/val split, per-epoch validation, KL warm-up and early
+  stopping (`Trainer`); `final.pt` is then the best-validation epoch, not the last.
+- The Gaussian likelihood scale sigma is always learned (`LearnedLikelihoodScale`, log
   sigma^2); `likelihood_scale` in each model config is only its starting value. Do not
   add a fixed-sigma option back: it made results depend on a hand-picked number.
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic

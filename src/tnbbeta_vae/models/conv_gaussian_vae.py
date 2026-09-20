@@ -11,13 +11,15 @@ diagonal-Gaussian posterior, a standard-normal prior, and a closed-form KL
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
 from torch.distributions import Independent, Normal
 
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
-from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
+from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
 
@@ -39,6 +41,9 @@ class ConvGaussianVAEConfig(BaseModel):
             likelihood's standard deviation. It is learned (one scalar shared by
             all pixels, parameterized by log sigma^2), so this only sets where
             training starts.
+        likelihood: ``"gaussian"`` (learned sigma) or ``"bernoulli"`` (binarized
+            images; the decoder logits are the Bernoulli parameters and
+            ``likelihood_scale`` is unused).
         num_elbo_samples: Number of z ~ q(z|x) draws averaged for the
             reconstruction term (the KL is closed-form, so it needs none).
     """
@@ -48,6 +53,7 @@ class ConvGaussianVAEConfig(BaseModel):
     hidden_channels: int = 32
     latent_dim: int = 8
     likelihood_scale: float = 1.0
+    likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
 
 
@@ -95,12 +101,14 @@ class ConvGaussianVAE(nn.Module):
         z = posterior.rsample()
         return self.decoder(z), posterior, z
 
-    def training_step(self, batch: Tensor) -> dict[str, Tensor]:
+    def training_step(self, batch: Tensor, kl_weight: float = 1.0) -> dict[str, Tensor]:
         """Computes the negative ELBO (closed-form KL) for one batch.
 
         Args:
             batch: Input images, shape ``(batch, image_channels,
                 image_size, image_size)``.
+            kl_weight: Multiplier on the KL term in the returned loss (for KL
+                warm-up). ``"kl"`` and ``"log_likelihood"`` are unweighted.
 
         Returns:
             A dict with ``"loss"`` (the mean negative ELBO), ``"log_likelihood"``,
@@ -114,17 +122,44 @@ class ConvGaussianVAE(nn.Module):
             batch,
             posterior,
             prior,
-            self.decoder,
+            self._decode_for_likelihood,
             scale,
             self.config.num_elbo_samples,
             analytic_kl=True,
+            likelihood=self.config.likelihood,
         )
         return {
-            "loss": -elbo_terms["elbo"].mean(),
+            "loss": -(
+                elbo_terms["log_likelihood"] - kl_weight * elbo_terms["kl"]
+            ).mean(),
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
             "likelihood_scale": torch.as_tensor(scale).detach(),
         }
+
+    def posterior_and_prior(self, x: Tensor) -> tuple[Independent, Independent]:
+        """Returns ``q(z|x)`` and the N(0, I) prior for a batch of images."""
+        mu, sigma = self._encode(x)
+        posterior = Independent(Normal(mu, sigma), 1)
+        prior = Independent(Normal(torch.zeros_like(mu), torch.ones_like(sigma)), 1)
+        return posterior, prior
+
+    def log_likelihood(self, x: Tensor, z: Tensor) -> Tensor:
+        """Returns ``log p(x|z)`` summed over pixels.
+
+        Args:
+            x: Images, shape ``(batch, channels, height, width)``.
+            z: Latents, shape ``(*samples, batch, latent_dim)``.
+
+        Returns:
+            Tensor of shape ``(*samples, batch)``.
+        """
+        return pixel_log_likelihood(
+            x,
+            self._decode_for_likelihood(z),
+            self.config.likelihood,
+            self.learned_scale(),
+        )
 
     @torch.no_grad()
     def generate(self, num_samples: int) -> Tensor:
@@ -151,3 +186,9 @@ class ConvGaussianVAE(nn.Module):
         mu, log_var = self.posterior_head(self.encoder(x)).chunk(2, dim=-1)
         log_var = log_var.clamp(-_LOG_VAR_BOUND, _LOG_VAR_BOUND)
         return mu, torch.exp(0.5 * log_var)
+
+    def _decode_for_likelihood(self, z: Tensor) -> Tensor:
+        """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""
+        if self.config.likelihood == "bernoulli":
+            return self.decoder.logits(z)
+        return self.decoder(z)

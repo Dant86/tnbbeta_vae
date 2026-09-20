@@ -42,14 +42,27 @@ def test_decoder_preserves_arbitrary_leading_batch_dims() -> None:
     assert images.shape == (2, 3, 3, 32, 32)
 
 
-def test_encoder_rejects_image_size_not_divisible_by_eight() -> None:
-    with pytest.raises(ValueError, match="divisible by 8"):
-        ConvEncoder(image_channels=3, image_size=30, hidden_channels=8)
+def test_non_multiple_of_eight_size_is_padded_and_cropped_back() -> None:
+    encoder = ConvEncoder(image_channels=1, image_size=28, hidden_channels=8)
+    decoder = ConvDecoder(
+        latent_dim=6, image_channels=1, image_size=28, hidden_channels=8
+    )
+
+    features = encoder(torch.randn(4, 1, 28, 28))
+
+    assert encoder.feature_size == decoder.feature_size == 4
+    assert features.shape == (4, encoder.out_features)
+    assert decoder(torch.randn(4, 6)).shape == (4, 1, 28, 28)
+    assert decoder.logits(torch.randn(2, 3, 6)).shape == (2, 3, 1, 28, 28)
 
 
-def test_decoder_rejects_image_size_not_divisible_by_eight() -> None:
-    with pytest.raises(ValueError, match="divisible by 8"):
-        ConvDecoder(latent_dim=6, image_channels=3, image_size=30, hidden_channels=8)
+def test_forward_is_the_sigmoid_of_logits() -> None:
+    decoder = ConvDecoder(
+        latent_dim=6, image_channels=3, image_size=32, hidden_channels=8
+    )
+    z = torch.randn(4, 6)
+
+    assert torch.allclose(decoder(z), torch.sigmoid(decoder.logits(z)))
 
 
 def test_encoder_rejects_hidden_channels_not_divisible_by_eight() -> None:

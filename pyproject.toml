@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.2.3",
     "pytorch-fid>=0.3.0",
     "pyyaml>=6.0.3",
+    "scipy>=1.18.1",
     "torch>=2.14.0",
     "torchvision>=0.29.0",
 ]

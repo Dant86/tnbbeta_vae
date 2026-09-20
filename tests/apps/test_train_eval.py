@@ -13,6 +13,7 @@ from apps.eval import export_latents
 from apps.eval import main as eval_main
 from apps.train import main as train_main
 from tnbbeta_vae.data.cifar10 import Cifar10Images
+from tnbbeta_vae.data.mnist import MnistImages
 
 _MODELS = [
     ("conv_gaussian_vae", []),
@@ -154,3 +155,59 @@ def test_export_latents_writes_parameters_labels_and_probe(
         mode = latents["mode_direction"]
         flips = np.where(latents["p"][:, None] > 0.5, 1.0, -1.0)
         assert np.allclose(mode, flips * latents["direction"])
+
+
+def _fake_mnist(*_args: object, split: str, **_kwargs: object) -> MnistImages:
+    generator = torch.Generator().manual_seed(0)
+    images = torch.rand(16, 1, 28, 28, generator=generator)
+    return MnistImages(images, torch.arange(16) % 10, dynamic=split == "train")
+
+
+@pytest.mark.parametrize("model", ["conv_gaussian_vae", "conv_tnbbeta_spherical_vae"])
+def test_train_mnist_with_validation_and_kl_warmup(
+    model: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(train_main, "load_mnist", _fake_mnist)
+
+    train_main.main(
+        [
+            "--model",
+            model,
+            "--dataset",
+            "mnist",
+            "--set",
+            "latent_dim=4",
+            "--set",
+            "hidden_channels=8",
+            "--epochs",
+            "3",
+            "--batch-size",
+            "8",
+            "--num-workers",
+            "0",
+            "--device",
+            "cpu",
+            "--run-name",
+            "mnist_smoke",
+            "--patience",
+            "5",
+            "--kl-warmup-epochs",
+            "2",
+        ]  # fmt: skip
+    )
+
+    checkpoints = tmp_path / "ckpt" / "mnist_smoke"
+    final = torch.load(checkpoints / "final.pt")
+    assert final["config"]["likelihood"] == "bernoulli"
+    assert final["config"]["image_size"] == 28
+    assert final["config"]["image_channels"] == 1
+    assert (checkpoints / "best.pt").exists()
+    metrics = (tmp_path / "runs" / "mnist_smoke" / "metrics.jsonl").read_text()
+    assert '"val_loss"' in metrics
+
+
+def test_patience_requires_a_validation_set() -> None:
+    with pytest.raises(SystemExit):
+        train_main.main(
+            ["--model", "conv_gaussian_vae", "--patience", "3", "--run-name", "x"]
+        )
