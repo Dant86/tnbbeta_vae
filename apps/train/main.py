@@ -34,7 +34,7 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.cifar10 import load_cifar10
-from tnbbeta_vae.data.mnist import load_mnist
+from tnbbeta_vae.data.mnist import DeviceBatches, load_mnist
 import tnbbeta_vae.models  # noqa: F401 -- import for its @register_model side effects
 from tnbbeta_vae.paths import checkpoint_dir, data_dir, runs_dir
 from tnbbeta_vae.registry import (
@@ -45,7 +45,7 @@ from tnbbeta_vae.registry import (
 from tnbbeta_vae.training import Trainer
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterable, Iterator
 
     from torch import Tensor
 
@@ -153,13 +153,13 @@ def main(argv: list[str] | None = None) -> None:
     (trainer.run_logger.run_dir / "train_args.json").write_text(
         json.dumps(vars(args), indent=2)
     )
-    loader, val_loader = _dataloaders(args, device)
+    train_batches, val_batches = _batches(args, device)
     print(f"Training {args.model} on {device}; checkpoints in {checkpoints}.")
     trainer.fit(
-        _OnDevice(loader, device),
+        train_batches,
         args.epochs,
         checkpoint_dir=checkpoints,
-        val_dataloader=None if val_loader is None else _OnDevice(val_loader, device),
+        val_dataloader=val_batches,
         patience=args.patience,
         kl_warmup_epochs=args.kl_warmup_epochs,
     )
@@ -177,29 +177,34 @@ class _OnDevice:
             yield batch.to(self._device, non_blocking=True)
 
 
-def _dataloaders(
+def _batches(
     args: argparse.Namespace, device: torch.device
-) -> tuple[DataLoader, DataLoader | None]:
-    """Builds the train loader and, for MNIST, the validation loader."""
+) -> tuple[Iterable[Tensor], Iterable[Tensor] | None]:
+    """Builds the train batches and, for MNIST, the validation batches (on device)."""
     if args.dataset == "mnist":
-        train_set = load_mnist(data_dir(), split="train")
-        val_loader = DataLoader(
-            load_mnist(data_dir(), split="val"),
-            batch_size=_VAL_BATCH_SIZE,
-            num_workers=args.num_workers,
+        train = DeviceBatches(
+            load_mnist(data_dir(), split="train"),
+            args.batch_size,
+            device,
+            shuffle=True,
+            drop_last=True,
         )
-    else:
-        train_set = load_cifar10(data_dir(), train=True)
-        val_loader = None
-    train_loader = DataLoader(
-        train_set,
+        val = DeviceBatches(
+            load_mnist(data_dir(), split="val"),
+            _VAL_BATCH_SIZE,
+            device,
+            shuffle=False,
+        )
+        return train, val
+    loader = DataLoader(
+        load_cifar10(data_dir(), train=True),
         batch_size=args.batch_size,
         shuffle=True,
         drop_last=True,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
     )
-    return train_loader, val_loader
+    return _OnDevice(loader, device), None
 
 
 def _select_device(requested: str | None) -> torch.device:

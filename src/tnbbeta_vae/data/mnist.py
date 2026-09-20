@@ -14,11 +14,12 @@ import torch
 from torch.utils.data import Dataset
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from torch import Tensor
 
-__all__ = ["MnistImages", "load_mnist"]
+__all__ = ["DeviceBatches", "MnistImages", "load_mnist"]
 
 _TRAIN_SIZE = 50_000
 _SPLIT_SEED = 0
@@ -66,6 +67,67 @@ class MnistImages(Dataset):
     def labels(self) -> Tensor:
         """Returns all class labels (0-9), in dataset order, as an int64 tensor."""
         return self._labels
+
+    @property
+    def images(self) -> Tensor:
+        """Returns the stored images: intensities if dynamic, else the fixed bits."""
+        return self._images
+
+    @property
+    def dynamic(self) -> bool:
+        """Returns whether images are re-binarized on every access."""
+        return self._dynamic
+
+
+class DeviceBatches:
+    """Re-iterable batches of an :class:`MnistImages`, kept on one device.
+
+    MNIST is small, so holding it on the GPU and binarizing each batch there avoids
+    the per-image Python overhead of a ``DataLoader`` (which dominated training time).
+    Dynamic datasets are resampled as Bernoulli(intensity) on every batch, using the
+    global torch RNG (so ``torch.manual_seed`` makes runs reproducible).
+    """
+
+    def __init__(
+        self,
+        dataset: MnistImages,
+        batch_size: int,
+        device: torch.device,
+        *,
+        shuffle: bool,
+        drop_last: bool = False,
+    ) -> None:
+        """Copies ``dataset`` to ``device``.
+
+        Args:
+            dataset: The images to batch.
+            batch_size: Images per batch.
+            device: Where the images live and the batches are produced.
+            shuffle: Whether to reshuffle at the start of every iteration.
+            drop_last: Whether to drop a final incomplete batch.
+        """
+        self._images = dataset.images.to(device)
+        self._dynamic = dataset.dynamic
+        self._batch_size = batch_size
+        self._shuffle = shuffle
+        self._drop_last = drop_last
+
+    def __len__(self) -> int:
+        """Returns the number of batches per pass."""
+        full, rest = divmod(len(self._images), self._batch_size)
+        return full + (0 if self._drop_last or rest == 0 else 1)
+
+    def __iter__(self) -> Iterator[Tensor]:
+        """Yields one pass of batches."""
+        count = len(self._images)
+        device = self._images.device
+        order = torch.randperm(count, device=device) if self._shuffle else None
+        stop = count - count % self._batch_size if self._drop_last else count
+        for start in range(0, stop, self._batch_size):
+            end = min(start + self._batch_size, count)
+            indices = order[start:end] if order is not None else slice(start, end)
+            batch = self._images[indices]
+            yield torch.bernoulli(batch) if self._dynamic else batch
 
 
 def load_mnist(

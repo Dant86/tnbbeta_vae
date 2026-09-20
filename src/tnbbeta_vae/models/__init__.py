@@ -16,6 +16,8 @@ from tnbbeta_vae.models.conv_vmf_vae import (
     ConvVonMisesFisherVAEConfig,
 )
 from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
+from tnbbeta_vae.models.graph_vae import GraphBatch, GraphVAE, GraphVAEConfig
+from tnbbeta_vae.models.mlp_vae import MlpVAE, MlpVAEConfig
 
 __all__ = [
     "ConvGaussianVAE",
@@ -24,5 +26,10 @@ __all__ = [
     "ConvTNBBetaSphericalVAEConfig",
     "ConvVonMisesFisherVAE",
     "ConvVonMisesFisherVAEConfig",
+    "GraphBatch",
+    "GraphVAE",
+    "GraphVAEConfig",
+    "MlpVAE",
+    "MlpVAEConfig",
     "tnbbeta_spherical_posterior_diagnostics",
 ]
