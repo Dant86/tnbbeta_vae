@@ -17,7 +17,6 @@ from torch import Tensor, nn
 from torch.distributions import Independent, Normal
 
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
-from tnbbeta_vae.models.diagnostics import gaussian_posterior_diagnostics
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
@@ -36,11 +35,10 @@ class ConvGaussianVAEConfig(BaseModel):
             divisible by 8.
         hidden_channels: Base conv channel width; must be divisible by 8.
         latent_dim: Dimensionality of the Gaussian latent.
-        likelihood_scale: Fixed standard deviation of the Gaussian
-            reconstruction likelihood.
-            (The starting value when ``learn_likelihood_scale`` is set.)
-        learn_likelihood_scale: If True, ``likelihood_scale`` becomes a learned
-            shared scalar (parameterized by log sigma^2) instead of a fixed value.
+        likelihood_scale: Starting value of the Gaussian reconstruction
+            likelihood's standard deviation. It is learned (one scalar shared by
+            all pixels, parameterized by log sigma^2), so this only sets where
+            training starts.
         num_elbo_samples: Number of z ~ q(z|x) draws averaged for the
             reconstruction term (the KL is closed-form, so it needs none).
     """
@@ -50,7 +48,6 @@ class ConvGaussianVAEConfig(BaseModel):
     hidden_channels: int = 32
     latent_dim: int = 8
     likelihood_scale: float = 1.0
-    learn_likelihood_scale: bool = False
     num_elbo_samples: int = 1
 
 
@@ -79,11 +76,7 @@ class ConvGaussianVAE(nn.Module):
             config.image_size,
             config.hidden_channels,
         )
-        self.learned_scale = (
-            LearnedLikelihoodScale(config.likelihood_scale)
-            if config.learn_likelihood_scale
-            else None
-        )
+        self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Independent, Tensor]:
         """Runs a full encode -> sample -> decode pass.
@@ -111,10 +104,9 @@ class ConvGaussianVAE(nn.Module):
 
         Returns:
             A dict with ``"loss"`` (the mean negative ELBO), ``"log_likelihood"``,
-            ``"kl"``, and Gaussian collapse diagnostics (see
-            :func:`tnbbeta_vae.models.diagnostics.gaussian_posterior_diagnostics`).
+            ``"kl"`` and ``"likelihood_scale"``.
         """
-        scale = self._likelihood_scale()
+        scale = self.learned_scale()
         mu, sigma = self._encode(batch)
         posterior = Independent(Normal(mu, sigma), 1)
         prior = Independent(Normal(torch.zeros_like(mu), torch.ones_like(sigma)), 1)
@@ -132,7 +124,6 @@ class ConvGaussianVAE(nn.Module):
             "log_likelihood": elbo_terms["log_likelihood"].mean(),
             "kl": elbo_terms["kl"].mean(),
             "likelihood_scale": torch.as_tensor(scale).detach(),
-            **gaussian_posterior_diagnostics(mu, sigma),
         }
 
     @torch.no_grad()
@@ -160,9 +151,3 @@ class ConvGaussianVAE(nn.Module):
         mu, log_var = self.posterior_head(self.encoder(x)).chunk(2, dim=-1)
         log_var = log_var.clamp(-_LOG_VAR_BOUND, _LOG_VAR_BOUND)
         return mu, torch.exp(0.5 * log_var)
-
-    def _likelihood_scale(self) -> float | Tensor:
-        """Returns the learned scale if enabled, else the configured constant."""
-        if self.learned_scale is None:
-            return self.config.likelihood_scale
-        return self.learned_scale()

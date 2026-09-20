@@ -8,9 +8,8 @@ module stays free of any distribution-specific logic and could equally
 well feed a different latent family.
 
 Every conv/deconv/projection layer (other than the final output) is
-followed by GroupNorm. Without it, a sweep along a single geodesic
-direction in latent space (see
-:func:`tnbbeta_vae.models.diagnostics.sphere_geodesic_sweep`) showed the
+followed by GroupNorm. Without it, an early sweep along a single geodesic
+direction in latent space showed the
 decoder swinging output color wildly for *any* direction, not some
 dedicated "color" subspace -- a hair-trigger, poorly-conditioned mapping
 that left no safe direction for the encoder to route weakly-rewarded

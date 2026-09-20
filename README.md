@@ -18,7 +18,7 @@ apps/data/        # CLI entrypoint for downloading CIFAR-10
 scripts/          # Shell scripts (scripts/train.sh)
 scripts/slurm/    # sbatch scripts for the UChicago DSI cluster
 src/tnbbeta_vae/
-  distributions/  # TNBBetaUnivariate, TNBBetaSpherical, VonMisesFisher (S-VAE port)
+  distributions/  # TNBBetaUnivariate, TNBBetaSpherical
   paths.py        # data/checkpoint/runs directories (from .env)
   models/         # architectures/, priors/, losses/
   registry.py     # model registry (Pydantic configs -> model classes)
@@ -73,16 +73,19 @@ environment variables override `.env`.
 
 ```bash
 uv run python -m apps.data.download_cifar10          # once; needs network
-uv run python -m apps.train.main --model conv_vmf_vae --run-name vmf_test \
+uv run python -m apps.train.main --model conv_tnbbeta_spherical_vae --run-name tnb_test \
     --set latent_dim=32 --set likelihood_scale=0.1 --epochs 20 --resume
-uv run python -m apps.eval.main --run-name vmf_test  # writes eval_final_test.json + PNGs
+uv run python -m apps.eval.main --run-name tnb_test  # writes eval_final_test.json + PNGs
 ```
+
+The Gaussian likelihood's scale sigma is always learned (one scalar shared by
+all pixels); `--set likelihood_scale=...` only sets its starting value.
 
 Training writes `latest.pt` every epoch and `final.pt` at the end under
 `$TNBBETA_CHECKPOINT_DIR/<run-name>/`; `--resume` continues from
 `latest.pt` (and does nothing if `final.pt` exists), so re-running after a
-preemption is safe. For TNBBeta models, `--uniform-prior` sets the prior
-to Uniform(sphere).
+preemption is safe. TNBBeta's prior is always Uniform(sphere)
+(p=0.5, q=0, epsilon=(d-1)/2).
 
 ### Running on the UChicago DSI cluster
 
@@ -93,10 +96,10 @@ the three paths at storage you own, then `mkdir -p slurm_logs`.
 
 ```bash
 sbatch scripts/slurm/download_cifar10.sbatch        # or run the download on the login node
-sbatch scripts/slurm/train.sbatch conv_vmf_vae vmf_s0.1_d32_seed0 \
+sbatch scripts/slurm/train.sbatch conv_tnbbeta_spherical_vae tnb_d32_seed0 \
     --set latent_dim=32 --set likelihood_scale=0.1 --epochs 50
 sbatch scripts/slurm/sweep.sbatch                   # 12-task array; edit the grid inside
-sbatch scripts/slurm/eval.sbatch vmf_s0.1_d32_seed0
+sbatch scripts/slurm/eval.sbatch tnb_d32_seed0
 ```
 
 The default QoS is preemptable, so the scripts use `--requeue` together
@@ -106,17 +109,14 @@ with `--resume`. The resource requests in the scripts (1 GPU, 4 CPUs,
 Each run's config and metrics are logged locally under `runs/<run_id>/`
 (see `tnbbeta_vae.training.RunLogger`) for later inspection.
 
-### Posterior collapse diagnostics
+### Logged posterior statistics
 
-`p -> 0, q -> 1` (the posterior collapsing to a point mass sitting
-wherever the prior already is, independent of `x`) is a known failure
-mode worth watching for. Every `training_step` call logs
-`posterior_p_{mean,min,max}`, `posterior_q_{mean,min,max}`, and
-`posterior_direction_pairwise_cosine_mean` (see
-`tnbbeta_vae.models.diagnostics`) alongside `loss`/`kl` -- a collapse
-shows up as `q` trending toward 1 and/or the pairwise cosine trending
-toward 1 (the encoder converging to ~the same direction for every input)
-in `runs/<run_id>/metrics.jsonl`.
+Every `training_step` logs `posterior_p_{mean,min,max}`,
+`posterior_q_{mean,min,max}`, `posterior_epsilon_mean` (see
+`tnbbeta_vae.models.diagnostics`) and the current `likelihood_scale`
+alongside `loss`/`kl` in `runs/<run_id>/metrics.jsonl`. Things to watch
+for: p or q pinned at its clamp (1e-6), or q drifting toward 1 (a thin
+ring around the mean direction).
 
 For fast local iteration before touching real data,
 `tnbbeta_vae.data.gaussian_blob_batch` generates small synthetic images

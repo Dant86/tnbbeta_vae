@@ -8,16 +8,22 @@ Writes ``$TNBBETA_CHECKPOINT_DIR/<run-name>/latents_<checkpoint>_<split>.npz``
 with, per image and in dataset order:
 
 * ``labels``: CIFAR-10 class (0-9).
-* ``direction``: the posterior's mean direction (TNBBeta, vMF) or mean (Gaussian).
+* ``direction``: the posterior's mean direction (TNBBeta) or mean (Gaussian).
+* ``mode_direction``: TNBBeta only -- the direction the posterior is centered
+  on. The parameterization has an antipodal alias ((mu, p) and (-mu, 1 - p)
+  describe the same distribution), so this is ``direction`` if ``p > 0.5`` and
+  ``-direction`` otherwise.
 * ``p``, ``q``, ``epsilon``: TNBBeta posterior parameters (TNBBeta only).
-* ``concentration``: vMF kappa, or the Gaussian's mean posterior std (per image).
+* ``concentration``: the Gaussian's mean posterior std (per image; Gaussian only).
 * ``z``: one posterior sample.
-* ``kl``: per-image KL to the prior (exact for Gaussian and vMF, a 16-sample
+* ``kl``: per-image KL to the prior (exact for the Gaussian, a 16-sample
   Monte Carlo estimate for TNBBeta).
 
 It also writes ``latent_probe_<checkpoint>_<split>.json`` with the accuracy of
 a k-nearest-neighbour class probe on several features, as a rough measure of
-how much class structure the posterior carries.
+how much class structure the posterior carries. Use the ``*_cosine`` entries
+to compare models: raw Euclidean distance penalizes latents whose vector
+lengths vary (e.g. Gaussian means), which unit-length sphere directions avoid.
 """
 
 from __future__ import annotations
@@ -104,17 +110,14 @@ def _encode_batch(
         }
     posterior = model._encode(batch)
     prior = model.prior()
-    if kind == "conv_vmf_vae":
-        return {
-            "direction": posterior.loc,
-            "concentration": posterior.scale.squeeze(-1),
-            "z": posterior.sample(),
-            "kl": kl_divergence(posterior, prior),
-        }
     z = posterior.sample((_KL_SAMPLES,))
     kl = (posterior.log_prob(z) - prior.log_prob(z)).mean(dim=0)
+    direction = posterior.mean_direction
     return {
-        "direction": posterior.mean_direction,
+        "direction": direction,
+        "mode_direction": torch.where(
+            (posterior.p > 0.5)[:, None], direction, -direction
+        ),
         "p": posterior.p,
         "q": posterior.q,
         "epsilon": posterior.epsilon,
@@ -129,6 +132,8 @@ def _probe_accuracies(arrays: dict[str, np.ndarray]) -> dict[str, float]:
     features: dict[str, np.ndarray] = {
         "direction": arrays["direction"],
         "z_sample": arrays["z"],
+        "direction_cosine": _normalized(arrays["direction"]),
+        "z_cosine": _normalized(arrays["z"]),
     }
     if "p" in arrays:
         features["direction_and_p"] = np.concatenate(
@@ -139,6 +144,11 @@ def _probe_accuracies(arrays: dict[str, np.ndarray]) -> dict[str, float]:
         name: _knn_accuracy(torch.as_tensor(value), labels, half)
         for name, value in features.items()
     }
+
+
+def _normalized(features: np.ndarray) -> np.ndarray:
+    """Scales each row to unit length, so k-NN distance is cosine distance."""
+    return features / np.linalg.norm(features, axis=1, keepdims=True)
 
 
 def _knn_accuracy(features: torch.Tensor, labels: torch.Tensor, split: int) -> float:

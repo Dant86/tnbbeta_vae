@@ -11,7 +11,7 @@ from torch.distributions import Normal
 from tnbbeta_vae.models.losses import LearnedLikelihoodScale
 from tnbbeta_vae.registry import build_model
 
-_MODELS = ["conv_gaussian_vae", "conv_vmf_vae", "conv_tnbbeta_spherical_vae"]
+_MODELS = ["conv_gaussian_vae", "conv_tnbbeta_spherical_vae"]
 
 
 def _build(name: str, **overrides: object) -> Any:
@@ -40,9 +40,9 @@ def test_optimum_is_the_root_mean_squared_error() -> None:
 
 
 @pytest.mark.parametrize("name", _MODELS)
-def test_learned_scale_receives_gradients_and_is_reported(name: str) -> None:
+def test_scale_starts_at_the_configured_value_and_receives_gradients(name: str) -> None:
     torch.manual_seed(0)
-    model = _build(name, likelihood_scale=0.5, learn_likelihood_scale=True)
+    model = _build(name, likelihood_scale=0.5)
 
     out = model.training_step(torch.rand(4, 3, 32, 32))
     out["loss"].backward()
@@ -53,19 +53,7 @@ def test_learned_scale_receives_gradients_and_is_reported(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", _MODELS)
-def test_disabled_leaves_the_state_dict_unchanged(name: str) -> None:
-    fixed = _build(name, likelihood_scale=0.5)
-    learned = _build(name, likelihood_scale=0.5, learn_likelihood_scale=True)
+def test_scale_is_a_model_parameter(name: str) -> None:
+    model = _build(name, likelihood_scale=0.5)
 
-    assert fixed.learned_scale is None
-    extra = set(learned.state_dict()) - set(fixed.state_dict())
-    assert extra == {"learned_scale.log_variance"}
-    assert set(fixed.state_dict()) <= set(learned.state_dict())
-
-
-@pytest.mark.parametrize("name", _MODELS)
-def test_fixed_scale_is_still_reported(name: str) -> None:
-    torch.manual_seed(0)
-    out = _build(name, likelihood_scale=0.25).training_step(torch.rand(4, 3, 32, 32))
-
-    assert out["likelihood_scale"].item() == pytest.approx(0.25)
+    assert "learned_scale.log_variance" in model.state_dict()

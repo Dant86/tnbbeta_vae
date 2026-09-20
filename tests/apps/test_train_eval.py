@@ -16,8 +16,7 @@ from tnbbeta_vae.data.cifar10 import Cifar10Images
 
 _MODELS = [
     ("conv_gaussian_vae", []),
-    ("conv_vmf_vae", []),
-    ("conv_tnbbeta_spherical_vae", ["--uniform-prior"]),
+    ("conv_tnbbeta_spherical_vae", []),
 ]
 
 
@@ -98,19 +97,15 @@ def test_resume_skips_completed_and_continues_partial(
     assert checkpoint["epochs_completed"] == 2
 
 
-def test_uniform_prior_rejected_for_non_tnbbeta_models() -> None:
-    with pytest.raises(SystemExit):
-        train_main.main(_train_args("conv_gaussian_vae", ["--uniform-prior"], epochs=1))
-
-
 def test_select_device_refuses_a_silent_cpu_fallback_under_slurm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     monkeypatch.setenv("SLURM_JOB_GPUS", "0")
 
-    with pytest.raises(SystemExit, match="refusing"):
+    with pytest.raises(SystemExit) as excinfo:
         train_main._select_device(None)
+    assert excinfo.value.code == train_main.NO_GPU_EXIT_CODE
     assert train_main._select_device("cpu").type == "cpu"
 
 
@@ -153,4 +148,8 @@ def test_export_latents_writes_parameters_labels_and_probe(
     assert latents["direction"].shape[1] == 4
     assert ("p" in latents.files) == is_tnbbeta
     probe = json.loads((run_checkpoints / "latent_probe_final_test.json").read_text())
-    assert set(probe) >= {"direction", "z_sample"}
+    assert set(probe) >= {"direction", "z_sample", "direction_cosine", "z_cosine"}
+    if is_tnbbeta:
+        mode = latents["mode_direction"]
+        flips = np.where(latents["p"][:, None] > 0.5, 1.0, -1.0)
+        assert np.allclose(mode, flips * latents["direction"])

@@ -4,7 +4,7 @@ Usage:
     uv run python -m apps.train.main --list
     uv run python -m apps.train.main --model <name> [--set key=value ...] \
         [--epochs N] [--batch-size N] [--lr X] [--seed N] \
-        [--run-name NAME [--resume]] [--uniform-prior]
+        [--run-name NAME [--resume]]
 
 Data, checkpoint and run-log locations come from ``.env`` (see
 ``.env.sample``). With ``--run-name``, checkpoints go to
@@ -27,7 +27,6 @@ from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.cifar10 import load_cifar10
 import tnbbeta_vae.models  # noqa: F401 -- import for its @register_model side effects
-from tnbbeta_vae.models.priors import uniform_prior_params
 from tnbbeta_vae.paths import checkpoint_dir, data_dir, runs_dir
 from tnbbeta_vae.registry import (
     build_model,
@@ -42,6 +41,8 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 _SLURM_GPU_VARIABLES = ("SLURM_JOB_GPUS", "SLURM_GPUS_ON_NODE", "SLURM_STEP_GPUS")
+# EX_TEMPFAIL: scripts/slurm/train.sbatch resubmits the job on this exit code.
+NO_GPU_EXIT_CODE = 75
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -81,11 +82,6 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Continue from <run-name>'s latest checkpoint if one exists.",
     )
-    parser.add_argument(
-        "--uniform-prior",
-        action="store_true",
-        help="For TNBBeta models: set (p, q, epsilon) so the prior is Uniform(sphere).",
-    )
     args = parser.parse_args(argv)
 
     if args.list:
@@ -98,8 +94,6 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--resume requires --run-name.")
 
     overrides = _parse_overrides(args.set)
-    if args.uniform_prior:
-        overrides.update(_uniform_prior_overrides(args.model, overrides))
 
     checkpoints = checkpoint_dir() / args.run_name if args.run_name else None
     if args.resume and checkpoints and (checkpoints / "final.pt").exists():
@@ -166,18 +160,21 @@ def _select_device(requested: str | None) -> torch.device:
         The device to train on.
 
     Raises:
-        SystemExit: If a Slurm GPU was allocated but CUDA is unavailable.
+        SystemExit: With ``NO_GPU_EXIT_CODE`` if a Slurm GPU was allocated but
+            CUDA is unavailable.
     """
     if requested is not None:
         return torch.device(requested)
     if torch.cuda.is_available():
         return torch.device("cuda")
     if any(os.environ.get(name) for name in _SLURM_GPU_VARIABLES):
-        raise SystemExit(
+        print(
             "Slurm allocated a GPU but CUDA is unavailable on this node; refusing "
             "to fall back to the CPU. Resubmit, excluding this node (sbatch "
-            "--exclude=<node>), or pass --device cpu to train on the CPU anyway."
+            "--exclude=<node>), or pass --device cpu to train on the CPU anyway.",
+            file=sys.stderr,
         )
+        raise SystemExit(NO_GPU_EXIT_CODE)
     return torch.device("cpu")
 
 
@@ -195,22 +192,6 @@ def _parse_overrides(pairs: list[str]) -> dict[str, str]:
         key, _, value = pair.partition("=")
         overrides[key] = value
     return overrides
-
-
-def _uniform_prior_overrides(
-    model_name: str, overrides: dict[str, str]
-) -> dict[str, str]:
-    """Returns overrides that make a TNBBeta model's prior uniform on the sphere."""
-    fields = get_registered_model(model_name).config_cls.model_fields
-    if "prior_p" not in fields:
-        raise SystemExit(
-            f"--uniform-prior only applies to TNBBeta models, not {model_name!r}."
-        )
-    latent_dim = int(
-        overrides.get("latent_dim") or cast("int", fields["latent_dim"].default)
-    )
-    p, q, epsilon = uniform_prior_params(latent_dim)
-    return {"prior_p": str(p), "prior_q": str(q), "prior_epsilon": str(epsilon)}
 
 
 if __name__ == "__main__":

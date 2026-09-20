@@ -60,7 +60,6 @@ def test_training_step_returns_finite_loss_and_metrics() -> None:
         "posterior_q_min",
         "posterior_q_max",
         "posterior_epsilon_mean",
-        "posterior_direction_pairwise_cosine_mean",
     }
     assert set(outputs) == expected_keys
     for value in outputs.values():
@@ -151,7 +150,7 @@ def test_trainer_runs_end_to_end_on_gaussian_blob_batches(
     Confirms the full pipeline (model, Trainer, RunLogger) works with
     tnbbeta_vae.data.gaussian_blob_batch end to end, and that the
     posterior-collapse diagnostics make it into the logged metrics --
-    this is the setup meant for locally watching p/q/cosine trends over
+    this is the setup meant for locally watching p/q/epsilon trends over
     a real (if small) run.
     """
     monkeypatch.chdir(tmp_path)
@@ -173,10 +172,7 @@ def test_trainer_runs_end_to_end_on_gaussian_blob_batches(
     step_records = [r for r in records if "loss" in r]
     assert len(step_records) == 3 * 2
     assert all(math.isfinite(r["posterior_q_max"]) for r in step_records)
-    assert all(
-        math.isfinite(r["posterior_direction_pairwise_cosine_mean"])
-        for r in step_records
-    )
+    assert all(math.isfinite(r["posterior_epsilon_mean"]) for r in step_records)
 
 
 def _small_model() -> ConvTNBBetaSphericalVAE:
@@ -189,3 +185,16 @@ def test_generate_returns_valid_images() -> None:
 
     assert images.shape == (5, 3, 32, 32)
     assert images.min() >= 0 and images.max() <= 1
+
+
+def test_p_and_q_are_bounded_away_from_the_boundary() -> None:
+    model = ConvTNBBetaSphericalVAE(
+        ConvTNBBetaSphericalVAEConfig(latent_dim=4, hidden_channels=8)
+    )
+    with torch.no_grad():
+        model.posterior_head.bias[-3:-1] = torch.tensor([50.0, -50.0])  # p -> 1, q -> 0
+
+        posterior = model._encode(torch.rand(3, 3, 32, 32))
+
+    assert torch.allclose(posterior.p, torch.full((3,), 1 - 1e-6), atol=1e-7)
+    assert torch.allclose(posterior.q, torch.full((3,), 1e-6), atol=1e-7)
