@@ -104,6 +104,15 @@ uv run python -m apps.eval.svae_knn --run-name mnist_tnb_d10_seed0   # Table 2: 
 uv run python -m apps.eval.svae_table --kind knn     # Table 2 aggregated over seeds
 ```
 
+Two more experiments from the paper:
+
+```bash
+uv run python -m apps.synthetic.circle_recovery      # sec. 5.1: recover a circle from R^100 (CPU, ~1 min)
+uv run python -m apps.data.download_planetoid        # once; Cora, Citeseer, Pubmed raw files
+sbatch scripts/slurm/link_prediction.sbatch          # Table 4: 9 tasks (dataset x latent family)
+uv run python -m apps.link_prediction.table          # test AUC / AP, mean +- std over seeds
+```
+
 MNIST is binarized dynamically for training and once (fixed seed) for validation and test.
 `apps.eval.svae_metrics` reports the importance-weighted log-likelihood (500 samples), the
 ELBO, the reconstruction term and the KL, in nats per image.
