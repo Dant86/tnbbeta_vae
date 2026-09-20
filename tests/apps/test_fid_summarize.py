@@ -43,6 +43,7 @@ def test_frechet_distance_is_zero_for_identical_and_grows_with_shift() -> None:
 def test_fid_main_writes_prior_fid_and_real_floor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(torch.hub, "_hub_dir", None)
     monkeypatch.setattr(
         fid,
         "_build_extractor",
@@ -84,6 +85,7 @@ def test_fid_main_writes_prior_fid_and_real_floor(
         ]  # fmt: skip
     )
 
+    assert Path(torch.hub.get_dir()) == tmp_path / "data" / "torch_hub"
     results = json.loads((tmp_path / "ckpt" / "smoke" / "fid_final.json").read_text())
     assert results["num_samples"] == 8
     assert results["fid_prior"] > 0
@@ -127,3 +129,31 @@ def test_summarize_prints_row_with_gaps_and_dashes_for_missing(
 
     with pytest.raises(SystemExit):
         summarize.main([])
+
+
+def test_download_inception_weights_caches_under_data_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from apps.data import download_inception_weights as download
+
+    monkeypatch.setattr(torch.hub, "_hub_dir", None)
+    monkeypatch.setattr(download, "_MIN_BYTES", 1)
+    requested: list[str] = []
+
+    def fake_download(url: str, **_kwargs: object) -> dict[str, object]:
+        requested.append(url)
+        target = Path(torch.hub.get_dir()) / "checkpoints" / Path(url).name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"weights")
+        return {}
+
+    monkeypatch.setattr(torch.hub, "load_state_dict_from_url", fake_download)
+
+    download.main([])
+
+    assert requested == [download.FID_WEIGHTS_URL]
+    assert (tmp_path / "data" / "torch_hub" / "checkpoints").is_dir()
+
+    monkeypatch.setattr(download, "_MIN_BYTES", 10**9)
+    with pytest.raises(RuntimeError):
+        download.main([])

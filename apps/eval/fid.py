@@ -14,9 +14,10 @@ Reads ``$TNBBETA_CHECKPOINT_DIR/<run-name>/<checkpoint>.pt`` and writes
   sample size, so compare ``fid_prior`` to this floor and only across runs with
   the same ``--num-samples``.
 
-Uses the pytorch-fid Inception weights (a 91.2 MB download by
-``pytorch_fid`` on first use, cached under ``$TORCH_HOME``). Compute nodes may
-have no internet access: run once on the login node so the weights are cached.
+Uses the pytorch-fid Inception weights, read from
+``$TNBBETA_DATA_DIR/torch_hub``. Download them once beforehand (a 91.2 MB file;
+compute nodes may have no internet access, so use the login node) with
+``uv run python -m apps.data.download_inception_weights``.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.cifar10 import load_cifar10
-from tnbbeta_vae.paths import checkpoint_dir, data_dir
+from tnbbeta_vae.paths import checkpoint_dir, data_dir, torch_hub_dir
 from tnbbeta_vae.training import load_model_checkpoint
 
 if TYPE_CHECKING:
@@ -60,6 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     torch.manual_seed(args.seed)
+    torch.hub.set_dir(str(torch_hub_dir()))
     device = torch.device(
         args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )

@@ -102,6 +102,14 @@ sbatch scripts/slurm/sweep.sbatch                   # 12-task array; edit the gr
 sbatch scripts/slurm/eval.sbatch tnb_d32_seed0
 ```
 
+For FID (`apps.eval.fid`), download the Inception weights once first, on the
+login node if compute nodes have no internet access:
+
+```bash
+uv run python -m apps.data.download_inception_weights
+uv run --no-sync python -m apps.eval.fid --run-name tnb_d32_seed0
+```
+
 The default QoS is preemptable, so the scripts use `--requeue` together
 with `--resume`. The resource requests in the scripts (1 GPU, 4 CPUs,
 16 GB, partition `general`) are starting points to adjust.
