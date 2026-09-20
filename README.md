@@ -87,6 +87,25 @@ Training writes `latest.pt` every epoch and `final.pt` at the end under
 preemption is safe. TNBBeta's prior is always Uniform(sphere)
 (p=0.5, q=0, epsilon=(d-1)/2).
 
+### MNIST and the S-VAE reproduction
+
+Reproduces the unsupervised MNIST experiment of the S-VAE paper (Davidson et al. 2018)
+with three models on the same conv architecture: Gaussian, vMF and TNBBeta.
+
+```bash
+uv run python -m apps.data.download_mnist            # once; needs network
+uv run python -m apps.train.main --model conv_tnbbeta_spherical_vae --dataset mnist \
+    --set latent_dim=10 --batch-size 64 --epochs 1000 --patience 50 \
+    --kl-warmup-epochs 100 --run-name mnist_tnb_d10_seed0 --resume
+uv run python -m apps.eval.svae_metrics --run-name mnist_tnb_d10_seed0
+sbatch scripts/slurm/mnist_sweep.sbatch              # 90-task array; edit the grid inside
+uv run python -m apps.eval.svae_table                # Table 1: mean +- std over seeds
+```
+
+MNIST is binarized dynamically for training and once (fixed seed) for validation and test.
+`apps.eval.svae_metrics` reports the importance-weighted log-likelihood (500 samples), the
+ELBO, the reconstruction term and the KL, in nats per image.
+
 ### Running on the UChicago DSI cluster
 
 One-time setup on the login node (see
