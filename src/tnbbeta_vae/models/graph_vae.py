@@ -12,23 +12,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Literal
 
 from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
-from torch.distributions import Distribution, Independent, Normal
+from torch.distributions import Distribution
 from torch.nn.functional import binary_cross_entropy_with_logits
 
-from tnbbeta_vae.distributions import HypersphericalUniform
 from tnbbeta_vae.models.heads import (
-    gaussian_posterior,
-    tnbbeta_posterior,
-    vmf_posterior,
-)
-from tnbbeta_vae.models.priors.tnbbeta_spherical import (
-    FixedTNBBetaSphericalPrior,
-    uniform_prior_params,
+    LatentFamily,
+    head_size,
+    posterior_from_raw,
+    standard_prior,
 )
 from tnbbeta_vae.registry import register_model
 
@@ -82,7 +77,7 @@ class GraphVAEConfig(BaseModel):
             plain inner product). Ignored for the Gaussian, whose latent scale is free.
     """
 
-    family: Literal["gaussian", "vmf", "tnbbeta"] = "tnbbeta"
+    family: LatentFamily = "tnbbeta"
     in_features: int = 1433
     hidden_dim: int = 32
     latent_dim: int = 16
@@ -102,22 +97,14 @@ class GraphVAE(nn.Module):
         """
         super().__init__()
         self.config = config
-        head_sizes = {
-            "gaussian": 2 * config.latent_dim,
-            "vmf": config.latent_dim + 1,
-            "tnbbeta": config.latent_dim + 3,
-        }
         self.first = nn.Linear(config.in_features, config.hidden_dim, bias=False)
         self.second = nn.Linear(
-            config.hidden_dim, head_sizes[config.family], bias=False
+            config.hidden_dim, head_size(config.family, config.latent_dim), bias=False
         )
         self.dropout = nn.Dropout(config.dropout)
         self.log_temperature = nn.Parameter(
             torch.tensor(math.log(_INITIAL_TEMPERATURE)),
             requires_grad=config.fixed_temperature is None,
-        )
-        self.tnbbeta_prior = FixedTNBBetaSphericalPrior(
-            config.latent_dim, *uniform_prior_params(config.latent_dim)
         )
 
     def training_step(
@@ -204,25 +191,10 @@ class GraphVAE(nn.Module):
         return torch.where((posterior.p > 0.5)[:, None], direction, -direction)  # pyright: ignore[reportAttributeAccessIssue]
 
     def _posterior(self, raw: Tensor) -> Distribution:
-        if self.config.family == "gaussian":
-            return gaussian_posterior(raw)
-        if self.config.family == "vmf":
-            return vmf_posterior(raw[..., :-1], raw[..., -1:])
-        return tnbbeta_posterior(raw, self.config.latent_dim)
+        return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
 
     def _prior(self, raw: Tensor) -> Distribution:
-        if self.config.family == "gaussian":
-            shape = (self.config.latent_dim,)
-            return Independent(
-                Normal(
-                    torch.zeros(shape, device=raw.device),
-                    torch.ones(shape, device=raw.device),
-                ),
-                1,
-            )
-        if self.config.family == "vmf":
-            return HypersphericalUniform(self.config.latent_dim - 1, device=raw.device)
-        return self.tnbbeta_prior()
+        return standard_prior(self.config.family, self.config.latent_dim, raw.device)
 
     def _sample_negatives(self, batch: GraphBatch) -> Tensor:
         """Draws one uniform random node pair per positive edge."""
