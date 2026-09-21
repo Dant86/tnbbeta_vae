@@ -28,7 +28,12 @@ from tnbbeta_vae.data.mnist import load_mnist
 from tnbbeta_vae.data.semi_supervised import SemiSupervisedBatches, UnlabeledBatches
 from tnbbeta_vae.models import M1M2VAE, M1M2Config
 from tnbbeta_vae.paths import checkpoint_dir, data_dir, runs_dir
-from tnbbeta_vae.training import Trainer, load_model_checkpoint, select_device
+from tnbbeta_vae.training import (
+    Trainer,
+    load_model_checkpoint,
+    require_readable_storage,
+    select_device,
+)
 
 _VAL_BATCH_SIZE = 1000
 _FAMILIES = ["gaussian", "vmf", "tnbbeta"]
@@ -63,6 +68,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args(argv)
 
+    require_readable_storage(checkpoint_dir(), data_dir(), runs_dir())
     checkpoints = checkpoint_dir() / args.run_name
     if args.resume and (checkpoints / "final.pt").exists():
         print(f"{args.run_name}: already complete ({checkpoints / 'final.pt'}).")

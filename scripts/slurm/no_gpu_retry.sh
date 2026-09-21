@@ -1,6 +1,7 @@
 #!/bin/bash
-# Sourced by the sbatch scripts. If a job's training step exited with the "no usable GPU"
-# code (apps.train.main exits 75 when Slurm allocated a GPU but CUDA fails to start),
+# Sourced by the sbatch scripts. If a job's training step exited with the node-problem code
+# (apps.train.main exits 75 when Slurm allocated a GPU but CUDA fails to start, or when the
+# node cannot read the shared storage),
 # resubmit it excluding the node it ran on, up to MAX_ATTEMPTS times: just that array task
 # inside an array, or the whole job with its arguments otherwise.
 #
@@ -37,7 +38,8 @@ resubmit_if_no_gpu() {
         what=" task ${SLURM_ARRAY_TASK_ID}"
         array_flag=(--array="${SLURM_ARRAY_TASK_ID}")
     fi
-    echo "No usable GPU on ${SLURMD_NODENAME}; resubmitting${what}" \
+    echo "Node problem on ${SLURMD_NODENAME} (no usable GPU or unreadable storage);" \
+        "resubmitting${what}" \
         "(attempt $((attempt + 1)) of ${MAX_ATTEMPTS}) excluding ${new_exclude}" >&2
     # The +-expansion keeps an empty array valid under `set -u` on older bash.
     sbatch --exclude="${new_exclude}" ${array_flag[@]+"${array_flag[@]}"} \
