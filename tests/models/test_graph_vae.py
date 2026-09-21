@@ -165,3 +165,25 @@ def test_driver_grid_search_selects_by_validation_auc_and_writes_results(
     assert "TNBBeta-VGAE" in rows[0]
     assert rows[2].startswith("| cora | AUC | ")
     assert "±" in rows[2] and "| - | - | - |" in rows[4]
+
+
+@pytest.mark.parametrize("family", _FAMILIES)
+def test_a_featureless_isolated_node_does_not_break_training(family: Any) -> None:
+    """Citeseer has such nodes: the GCN gives them an exactly zero raw output."""
+    torch.manual_seed(0)
+    graph = _community_graph()
+    size = graph.adjacency.shape[0]
+    padded = sp.block_diag([graph.adjacency, sp.csr_matrix((1, 1))], format="csr")
+    features = sp.vstack([graph.features, sp.csr_matrix((1, 6))], format="csr")
+    batch, _ = _batch(Graph(padded, features))
+    model = GraphVAE(GraphVAEConfig(family=family, in_features=6, latent_dim=4))
+
+    out = model.training_step(batch)
+    out["loss"].backward()
+    embeddings = model.embeddings(batch)
+
+    assert torch.isfinite(out["loss"])
+    assert embeddings.shape == (size + 1, 4)
+    assert torch.isfinite(embeddings).all()
+    if family != "gaussian":
+        assert torch.allclose(embeddings.norm(dim=-1), torch.ones(size + 1), atol=1e-4)
