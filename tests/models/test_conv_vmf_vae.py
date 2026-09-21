@@ -74,13 +74,11 @@ def test_default_initialization_starts_at_a_low_concentration() -> None:
     assert _kappas().median() < 3.0
 
 
-@pytest.mark.parametrize("parameterization", ["softplus", "exp"])
-def test_initial_kappa_sets_where_every_posterior_starts(parameterization: str) -> None:
-    kappas = _kappas(initial_kappa=40.0, kappa_parameterization=parameterization)
+def test_initial_kappa_sets_where_every_posterior_starts() -> None:
+    kappas = _kappas(initial_kappa=40.0)
 
-    # The random weights add spread around the bias (multiplicative for "exp"), so
-    # only check that the middle is within a factor of two of the request.
-    assert 20 < kappas.median() < 80
+    # The random weights add spread around the bias, so only check the middle.
+    assert 30 < kappas.median() < 55
     assert (kappas > 10).all()
 
 
@@ -90,34 +88,19 @@ def test_initial_kappa_must_be_between_one_and_the_float32_cap(bad: float) -> No
         _kappas(initial_kappa=bad)
 
 
-@pytest.mark.parametrize("parameterization", ["softplus", "exp"])
-@pytest.mark.parametrize("kappa", [1.5, 12.0, 4000.0])
-def test_kappa_inverse_round_trips(parameterization: str, kappa: float) -> None:
+@pytest.mark.parametrize("kappa", [1.5, 12.0, 4000.0, 250_000.0])
+def test_kappa_inverse_round_trips(kappa: float) -> None:
     from tnbbeta_vae.models.heads import vmf_kappa, vmf_kappa_inverse
 
-    param: Any = parameterization
-    raw = torch.tensor([vmf_kappa_inverse(kappa, param)])
+    raw = torch.tensor([vmf_kappa_inverse(kappa)])
 
-    assert vmf_kappa(raw, param).item() == pytest.approx(kappa, rel=1e-4)
+    assert vmf_kappa(raw).item() == pytest.approx(kappa, rel=1e-4)
 
 
-def test_exp_parameterization_grows_multiplicatively() -> None:
+def test_kappa_is_capped_where_float32_stops_being_meaningful() -> None:
     from tnbbeta_vae.models.heads import vmf_kappa
 
-    raw = torch.tensor([0.0, 5.0, 10.0])
-
-    assert vmf_kappa(raw, "exp")[2] > 20_000 > vmf_kappa(raw, "softplus")[2]
-
-
-@pytest.mark.parametrize("parameterization", ["softplus", "exp"])
-def test_kappa_is_capped_where_float32_stops_being_meaningful(
-    parameterization: str,
-) -> None:
-    from tnbbeta_vae.models.heads import vmf_kappa
-
-    param: Any = parameterization
-
-    kappa = vmf_kappa(torch.tensor([50.0, 1e9]), param)
+    kappa = vmf_kappa(torch.tensor([50.0, 1e9]))
 
     assert kappa.max().item() == pytest.approx(1e6)
     assert torch.isfinite(kappa).all()
@@ -131,7 +114,7 @@ def test_the_analytic_kl_is_accurate_up_to_the_cap() -> None:
 
     loc = torch.zeros(4, 2)
     loc[:, 0] = 1.0
-    kappa = vmf_kappa(torch.tensor([[1e9]] * 4), "exp")  # clamped to the cap
+    kappa = vmf_kappa(torch.tensor([[1e9]] * 4))  # clamped to the cap
 
     kl = kl_divergence(VonMisesFisher(loc, kappa), HypersphericalUniform(1))
 
@@ -140,7 +123,7 @@ def test_the_analytic_kl_is_accurate_up_to_the_cap() -> None:
     assert kl.mean().item() == pytest.approx(expected, abs=0.05)
 
 
-def test_a_training_step_with_the_exp_parameterization_has_finite_gradients() -> None:
+def test_a_training_step_from_a_large_initial_kappa_has_finite_gradients() -> None:
     torch.manual_seed(0)
     model = ConvVonMisesFisherVAE(
         ConvVonMisesFisherVAEConfig(
@@ -150,7 +133,6 @@ def test_a_training_step_with_the_exp_parameterization_has_finite_gradients() ->
             latent_dim=3,
             likelihood="bernoulli",
             initial_kappa=200.0,
-            kappa_parameterization="exp",
         )
     )
 
