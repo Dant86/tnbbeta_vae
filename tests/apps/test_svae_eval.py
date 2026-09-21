@@ -142,6 +142,8 @@ def test_table_skips_missing_runs_and_shows_dashes(
         (5, "mnist_gauss_d5_seed0", "conv_gaussian_vae", "5", "0"),
         (30, "mnist_vmf_d2_seed0", "conv_vmf_vae", "2", "0"),
         (89, "mnist_tnb_d128_seed4", "conv_tnbbeta_spherical_vae", "128", "4"),
+        (90, "mnist_vmfk_d2_seed0", "conv_vmf_vae", "2", "0"),
+        (114, "mnist_vmfk_d40_seed4", "conv_vmf_vae", "40", "4"),
     ],
 )
 def test_sweep_script_maps_array_index_to_model_dim_seed(
@@ -174,6 +176,10 @@ def test_sweep_script_maps_array_index_to_model_dim_seed(
     assert f"--set latent_dim={dim}" in train_call
     assert f"--seed {seed}" in train_call
     assert "--patience 50 --kl-warmup-epochs 100" in train_call
+    # Only the corrected vMF variant starts at kappa = the latent dimension.
+    assert ("--set initial_kappa=" + dim in train_call) == run_name.startswith(
+        "mnist_vmfk"
+    )
     assert f"apps.eval.svae_metrics --run-name {run_name}" in eval_call
     assert f"apps.eval.svae_knn --run-name {run_name}" in knn_call
 
