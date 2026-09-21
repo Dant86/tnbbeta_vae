@@ -22,6 +22,7 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 from tnbbeta_vae.models.heads import (
     LatentFamily,
     head_size,
+    posterior_centre,
     posterior_from_raw,
     standard_prior,
 )
@@ -183,12 +184,7 @@ class GraphVAE(nn.Module):
         undoes the (mu, p) ~ (-mu, 1 - p) alias).
         """
         posterior, _ = self.posterior_and_prior(batch)
-        if self.config.family == "gaussian":
-            return posterior.base_dist.loc  # pyright: ignore[reportAttributeAccessIssue]
-        if self.config.family == "vmf":
-            return posterior.loc  # pyright: ignore[reportAttributeAccessIssue]
-        direction = posterior.mean_direction  # pyright: ignore[reportAttributeAccessIssue]
-        return torch.where((posterior.p > 0.5)[:, None], direction, -direction)  # pyright: ignore[reportAttributeAccessIssue]
+        return posterior_centre(self.config.family, posterior)
 
     def _posterior(self, raw: Tensor) -> Distribution:
         return posterior_from_raw(self.config.family, raw, self.config.latent_dim)

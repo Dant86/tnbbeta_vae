@@ -26,6 +26,7 @@ __all__ = [
     "LatentFamily",
     "gaussian_posterior",
     "head_size",
+    "posterior_centre",
     "posterior_from_raw",
     "standard_prior",
     "tnbbeta_posterior",
@@ -120,6 +121,28 @@ def posterior_from_raw(
     if family == "vmf":
         return vmf_posterior(raw[..., :-1], raw[..., -1:])
     return tnbbeta_posterior(raw, latent_dim)
+
+
+def posterior_centre(family: LatentFamily, distribution: Distribution) -> Tensor:
+    """Returns a posterior's centre: the mean, or the mode direction on a sphere.
+
+    For TNBBeta the centre is the mean direction, negated when p < 0.5, which undoes
+    the (mu, p) ~ (-mu, 1 - p) alias.
+
+    Args:
+        family: The family ``distribution`` was built with.
+        distribution: A batch built by :func:`posterior_from_raw`.
+
+    Returns:
+        Tensor of shape ``(..., latent_dim)``.
+    """
+    if family == "gaussian":
+        return distribution.base_dist.loc  # pyright: ignore[reportAttributeAccessIssue]
+    if family == "vmf":
+        return distribution.loc  # pyright: ignore[reportAttributeAccessIssue]
+    direction = distribution.mean_direction  # pyright: ignore[reportAttributeAccessIssue]
+    flip = distribution.p > 0.5  # pyright: ignore[reportAttributeAccessIssue]
+    return torch.where(flip[..., None], direction, -direction)
 
 
 def standard_prior(
