@@ -113,6 +113,17 @@ sbatch scripts/slurm/link_prediction.sbatch          # Table 4: 9 tasks (dataset
 uv run python -m apps.link_prediction.table          # test AUC / AP, mean +- std over seeds
 ```
 
+Semi-supervised classification with 100 labels (Table 3) uses the stacked M1+M2 model,
+with any latent family for `z1` and `z2` (nn = Gaussian+Gaussian, ss = vMF+vMF, sn =
+vMF+Gaussian, tt/tn = TNBBeta):
+
+```bash
+uv run python -m apps.semi_supervised.main --run-name semi_ss_z10_10_seed0 \
+    --z1-family vmf --z2-family vmf --z1-dim 10 --z2-dim 10
+sbatch scripts/slurm/semi_supervised_sweep.sbatch    # 225 tasks (5 variants x 3x3 dims x 5 seeds)
+uv run python -m apps.semi_supervised.table          # test accuracy (%), mean +- std over seeds
+```
+
 MNIST is binarized dynamically for training and once (fixed seed) for validation and test.
 `apps.eval.svae_metrics` reports the importance-weighted log-likelihood (500 samples), the
 ELBO, the reconstruction term and the KL, in nats per image.
