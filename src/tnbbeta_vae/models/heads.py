@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import math
 from typing import TYPE_CHECKING, Literal
 
 import torch
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 __all__ = [
+    "KappaParameterization",
     "LatentFamily",
     "gaussian_posterior",
     "head_size",
@@ -30,10 +32,13 @@ __all__ = [
     "posterior_from_raw",
     "standard_prior",
     "tnbbeta_posterior",
+    "vmf_kappa",
+    "vmf_kappa_inverse",
     "vmf_posterior",
 ]
 
 LatentFamily = Literal["gaussian", "vmf", "tnbbeta"]
+KappaParameterization = Literal["softplus", "exp"]
 
 _PARAM_EPS = 1e-4
 # Bounds for the posterior's p and q. A clamped value passes no gradient; 1e-6 keeps
@@ -41,6 +46,8 @@ _PARAM_EPS = 1e-4
 # staying above what float32 can resolve near 1 (about 1e-7).
 _PQ_CLAMP = 1e-6
 _LOG_VAR_BOUND = 10.0
+# exp parameterization: cap log(kappa - 1) so kappa stays finite (about 5e8).
+_MAX_LOG_KAPPA = 20.0
 
 
 def tnbbeta_posterior(raw: Tensor, latent_dim: int) -> TNBBetaSpherical:
@@ -63,18 +70,52 @@ def tnbbeta_posterior(raw: Tensor, latent_dim: int) -> TNBBetaSpherical:
     return TNBBetaSpherical(mean_direction, p, q, epsilon)
 
 
-def vmf_posterior(raw_mean: Tensor, raw_kappa: Tensor) -> VonMisesFisher:
+def vmf_posterior(
+    raw_mean: Tensor,
+    raw_kappa: Tensor,
+    parameterization: KappaParameterization = "softplus",
+) -> VonMisesFisher:
     """Builds a von Mises-Fisher posterior as in the reference S-VAE.
 
     Args:
         raw_mean: Unnormalized mean direction, shape ``(batch, latent_dim)``.
         raw_kappa: Raw concentration, shape ``(batch, 1)``.
+        parameterization: How the raw output maps to kappa, see :func:`vmf_kappa`.
 
     Returns:
-        A batch of posteriors with unit mean and ``kappa = softplus(raw) + 1``.
+        A batch of posteriors with unit mean direction and concentration
+        ``vmf_kappa(raw_kappa, parameterization)``.
     """
     mean = _unit_direction(raw_mean)
-    return VonMisesFisher(mean, nn.functional.softplus(raw_kappa) + 1)
+    return VonMisesFisher(mean, vmf_kappa(raw_kappa, parameterization))
+
+
+def vmf_kappa(
+    raw: Tensor, parameterization: KappaParameterization = "softplus"
+) -> Tensor:
+    """Maps a raw network output to a concentration kappa > 1.
+
+    ``"softplus"`` (the reference S-VAE) is ``softplus(raw) + 1``: linear in ``raw`` for
+    large kappa, so reaching a large concentration needs a proportionally large raw
+    output, and it grows slowly. ``"exp"`` is ``1 + exp(raw)`` (raw capped at 20), which
+    grows multiplicatively.
+    """
+    if parameterization == "exp":
+        return 1 + raw.clamp(max=_MAX_LOG_KAPPA).exp()
+    return nn.functional.softplus(raw) + 1
+
+
+def vmf_kappa_inverse(
+    kappa: float, parameterization: KappaParameterization = "softplus"
+) -> float:
+    """Returns the raw output that :func:`vmf_kappa` maps to ``kappa`` (kappa > 1)."""
+    if kappa <= 1:
+        raise ValueError(f"kappa must be greater than 1; got {kappa}.")
+    excess = kappa - 1
+    if parameterization == "exp":
+        return math.log(excess)
+    # softplus^-1(x) = log(expm1(x)), which is x itself once exp(-x) is negligible.
+    return excess if excess > 30 else math.log(math.expm1(excess))
 
 
 def gaussian_posterior(raw: Tensor) -> Independent:

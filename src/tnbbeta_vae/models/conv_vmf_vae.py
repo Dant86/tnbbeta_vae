@@ -19,6 +19,11 @@ from torch import Tensor, nn
 
 from tnbbeta_vae.distributions import HypersphericalUniform, VonMisesFisher
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
+from tnbbeta_vae.models.heads import (
+    KappaParameterization,
+    vmf_kappa_inverse,
+    vmf_posterior,
+)
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
@@ -46,6 +51,14 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
         num_elbo_samples: Number of z ~ q(z|x) draws to average per ELBO
             estimate (the KL is exact, so this only affects the
             likelihood term).
+        initial_kappa: If set, initializes the concentration head's bias so every
+            posterior starts near this kappa (> 1). ``None`` keeps the reference
+            initialization (kappa near 1.7). The reference start is too noisy at high
+            latent dimension: a sample's expected cosine with its mean direction is only
+            about 0.04 at ``latent_dim=40``, the decoder learns to ignore z, and the
+            model collapses to the mean image. A kappa around ``latent_dim`` avoids it.
+        kappa_parameterization: ``"softplus"`` (reference) or ``"exp"``; see
+            :func:`tnbbeta_vae.models.heads.vmf_kappa`.
     """
 
     image_channels: int = 3
@@ -55,6 +68,8 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
     likelihood_scale: float = 1.0
     likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
+    initial_kappa: float | None = None
+    kappa_parameterization: KappaParameterization = "softplus"
 
 
 @register_model("conv_vmf_vae", config_cls=ConvVonMisesFisherVAEConfig)
@@ -86,6 +101,10 @@ class ConvVonMisesFisherVAE(nn.Module):
             config.hidden_channels,
         )
         self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
+        if config.initial_kappa is not None:
+            raw = vmf_kappa_inverse(config.initial_kappa, config.kappa_parameterization)
+            with torch.no_grad():
+                self.fc_var.bias.fill_(raw)
 
     def prior(self) -> HypersphericalUniform:
         """Builds the uniform-on-the-sphere prior."""
@@ -181,10 +200,11 @@ class ConvVonMisesFisherVAE(nn.Module):
     def _encode(self, x: Tensor) -> VonMisesFisher:
         """Maps images to a per-example von Mises-Fisher posterior."""
         features = self.encoder(x)
-        z_mean = self.fc_mean(features)
-        z_mean = z_mean / z_mean.norm(dim=-1, keepdim=True)
-        z_var = nn.functional.softplus(self.fc_var(features)) + 1
-        return VonMisesFisher(z_mean, z_var)
+        return vmf_posterior(
+            self.fc_mean(features),
+            self.fc_var(features),
+            self.config.kappa_parameterization,
+        )
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:
         """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""

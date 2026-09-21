@@ -1,9 +1,10 @@
 #!/bin/bash
-# Sourced by the array scripts. If a task's training step exited with the "no usable GPU"
+# Sourced by the sbatch scripts. If a job's training step exited with the "no usable GPU"
 # code (apps.train.main exits 75 when Slurm allocated a GPU but CUDA fails to start),
-# resubmit just that array task, excluding the node it ran on, up to MAX_ATTEMPTS times.
+# resubmit it excluding the node it ran on, up to MAX_ATTEMPTS times: just that array task
+# inside an array, or the whole job with its arguments otherwise.
 #
-#   resubmit_if_no_gpu STATUS SCRIPT
+#   resubmit_if_no_gpu STATUS SCRIPT [SCRIPT_ARGS...]
 #     returns 0 after resubmitting (the caller should then `exit 0`), and 1 when STATUS is
 #     not the no-GPU code (the caller handles it). Exits 1 itself once attempts run out.
 
@@ -12,6 +13,7 @@ MAX_ATTEMPTS=5
 
 resubmit_if_no_gpu() {
     local status="$1" script="$2"
+    shift 2
     if [[ "${status}" -ne "${NO_GPU_EXIT_CODE}" ]]; then
         return 1
     fi
@@ -30,9 +32,15 @@ resubmit_if_no_gpu() {
     fi
     new_exclude="${excluded:+${excluded},}${SLURMD_NODENAME}"
 
-    echo "No usable GPU on ${SLURMD_NODENAME}; resubmitting task ${SLURM_ARRAY_TASK_ID}" \
+    local what="" array_flag=()
+    if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+        what=" task ${SLURM_ARRAY_TASK_ID}"
+        array_flag=(--array="${SLURM_ARRAY_TASK_ID}")
+    fi
+    echo "No usable GPU on ${SLURMD_NODENAME}; resubmitting${what}" \
         "(attempt $((attempt + 1)) of ${MAX_ATTEMPTS}) excluding ${new_exclude}" >&2
-    sbatch --exclude="${new_exclude}" --array="${SLURM_ARRAY_TASK_ID}" \
-        --export="ALL,TNB_ATTEMPT=$((attempt + 1))" "${script}"
+    # The +-expansion keeps an empty array valid under `set -u` on older bash.
+    sbatch --exclude="${new_exclude}" ${array_flag[@]+"${array_flag[@]}"} \
+        --export="ALL,TNB_ATTEMPT=$((attempt + 1))" "${script}" "$@"
     return 0
 }
