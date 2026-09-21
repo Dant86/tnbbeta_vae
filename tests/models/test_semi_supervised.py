@@ -11,6 +11,7 @@ import torch
 from torch.nn.functional import cross_entropy
 
 from tnbbeta_vae.models import M1M2VAE, M1M2Config, SemiBatch
+from tnbbeta_vae.models.heads import posterior_from_raw, vmf_kappa_inverse
 from tnbbeta_vae.registry import build_model, list_registered_models
 
 _FAMILIES = ["gaussian", "vmf", "tnbbeta"]
@@ -156,3 +157,34 @@ def test_learns_to_classify_separable_data_from_a_few_labels(z1: Any) -> None:
     assert accuracy > 0.5, accuracy
     assert out["accuracy"].item() > 0.9
     assert math.isfinite(accuracy)
+
+
+def test_kappa_init_dimension_starts_every_vmf_head_at_its_dimension() -> None:
+    torch.manual_seed(0)
+    reference = _model("vmf", "vmf")
+    fixed = _model("vmf", "vmf", kappa_init="dimension")
+    x = torch.bernoulli(torch.rand(16, 20))
+
+    def kappa(model: M1M2VAE) -> float:
+        posterior: Any = posterior_from_raw("vmf", model.encoder1(x), 4)
+        return posterior.scale.median().item()
+
+    assert kappa(reference) < 3.0
+    assert 2.5 < kappa(fixed) < 6.0  # z1_dim = 4, plus spread from the random weights
+    # The encoder2 and decoder2 heads (z2_dim 3, z1_dim 4) start at their dimensions.
+    for network, dimension in ((fixed.encoder2, 3), (fixed.decoder2, 4)):
+        last: Any = network[-1]
+        bias = last.bias[-1].detach()
+        expected = vmf_kappa_inverse(float(dimension))
+        assert bias.item() == pytest.approx(expected, rel=1e-5)
+    assert torch.isfinite(fixed.training_step(_batch())["loss"])
+
+
+def test_kappa_init_leaves_non_vmf_heads_alone() -> None:
+    torch.manual_seed(0)
+    plain = _model("gaussian", "gaussian")
+    torch.manual_seed(0)
+    fixed = _model("gaussian", "gaussian", kappa_init="dimension")
+
+    for a, b in zip(plain.parameters(), fixed.parameters(), strict=True):
+        assert torch.equal(a, b)

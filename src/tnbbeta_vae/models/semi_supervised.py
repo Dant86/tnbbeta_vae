@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Any, Literal
 
 from pydantic import BaseModel
 import torch
@@ -32,6 +33,7 @@ from tnbbeta_vae.models.heads import (
     posterior_centre,
     posterior_from_raw,
     standard_prior,
+    vmf_kappa_inverse,
 )
 from tnbbeta_vae.registry import register_model
 
@@ -79,6 +81,11 @@ class M1M2Config(BaseModel):
         alpha: Classification weight, multiplied by ``num_examples`` (the paper's
             alpha is in [0.1, 1]).
         num_examples: Total number of training examples ``N`` in ``alpha * N``.
+        kappa_init: ``"reference"`` keeps the default initialization of every vMF
+            concentration head (kappa near 1.7). ``"dimension"`` starts each vMF head
+            at kappa equal to its latent dimension. The reference start is too noisy
+            at high dimension and collapses the model (see
+            ``ConvVonMisesFisherVAEConfig``).
     """
 
     z1_family: LatentFamily = "vmf"
@@ -90,6 +97,7 @@ class M1M2Config(BaseModel):
     num_classes: int = 10
     alpha: float = 0.5
     num_examples: int = 50_000
+    kappa_init: Literal["reference", "dimension"] = "reference"
 
 
 @register_model("m1m2_vae", config_cls=M1M2Config)
@@ -116,6 +124,8 @@ class M1M2VAE(nn.Module):
         self.decoder2 = _mlp(
             config.z2_dim + classes, hidden, head_size(config.z1_family, config.z1_dim)
         )
+        if config.kappa_init == "dimension":
+            self._start_kappas_at_dimension()
 
     def training_step(
         self, batch: SemiBatch, kl_weight: float = 1.0
@@ -179,6 +189,19 @@ class M1M2VAE(nn.Module):
         )
         centre = posterior_centre(self.config.z1_family, posterior)
         return self.classifier(centre).argmax(-1)
+
+    def _start_kappas_at_dimension(self) -> None:
+        """Sets every vMF head's kappa bias so it starts at its latent dimension."""
+        heads = [
+            (self.config.z1_family, self.encoder1, self.config.z1_dim),
+            (self.config.z2_family, self.encoder2, self.config.z2_dim),
+            (self.config.z1_family, self.decoder2, self.config.z1_dim),
+        ]
+        with torch.no_grad():
+            for family, network, dimension in heads:
+                if family == "vmf":
+                    last: Any = network[-1]
+                    last.bias[-1] = vmf_kappa_inverse(float(dimension))
 
     def _sample_z1(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Samples ``z1 ~ q(z1|x)``; returns it and ``A = log p(x|z1) - log q``."""
