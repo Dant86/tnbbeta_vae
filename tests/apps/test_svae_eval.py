@@ -293,3 +293,19 @@ def test_knn_table_reads_the_knn_files(
     assert "TNBBeta N=1000" in rows[0]
     assert "**0.81 ± 0.01**" in rows[2]
     assert "0.71 ± 0.01" in rows[2] and "**0.71" not in rows[2]
+
+
+def test_significant_winner_needs_a_significant_margin_over_every_competitor() -> None:
+    clear = {
+        "a": [1.0, 1.1, 0.9, 1.0],
+        "b": [0.0, 0.1, -0.1, 0.0],
+        "c": [0.2, 0.3, 0.1, 0.2],
+    }
+    close = {"a": [1.0, 1.1, 0.9, 1.0], "b": [0.98, 1.08, 0.9, 1.0]}
+
+    assert svae_table.significant_winner(clear, 0.01) == "a"
+    assert svae_table.significant_winner(close, 0.01) is None
+    assert svae_table.significant_winner({"a": [1.0, 2.0], "b": [1.0]}, 0.01) is None
+    assert (
+        svae_table.format_mean_std([1.0, 3.0], True, scale=100) == "**200.00 ± 141.42**"
+    )

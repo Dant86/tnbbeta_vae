@@ -69,6 +69,13 @@ automatically on commit, excluding `notebooks/`.
   (`likelihood="bernoulli"`, set automatically), 28x28 padded to 32 inside the conv
   encoder/decoder, a 50k/10k train/val split, per-epoch validation, KL warm-up and early
   stopping (`Trainer`); `final.pt` is then the best-validation epoch, not the last.
+- `models/mlp_vae.py` (vectors), `models/graph_vae.py` (link prediction) and
+  `models/semi_supervised.py` (M1+M2) take a latent `family` of `gaussian`, `vmf` or
+  `tnbbeta`; the posterior heads, priors and centres live in `models/heads.py`
+  (`posterior_from_raw`, `standard_prior`, `posterior_centre`), so a new family or model
+  should reuse them instead of copying. Entry points pick their device with
+  `tnbbeta_vae.training.select_device`, which exits with code 75 on a GPU-less node so
+  the sbatch scripts can resubmit (`scripts/slurm/no_gpu_retry.sh`).
 - The Gaussian likelihood scale sigma is always learned (`LearnedLikelihoodScale`, log
   sigma^2); `likelihood_scale` in each model config is only its starting value. Do not
   add a fixed-sigma option back: it made results depend on a hand-picked number.

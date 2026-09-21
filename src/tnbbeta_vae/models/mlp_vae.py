@@ -8,25 +8,19 @@ MLPs; the latent family only changes the posterior head, the prior and the KL
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
-from torch.distributions import Distribution, Independent, Normal
+from torch.distributions import Distribution
 
-from tnbbeta_vae.distributions import HypersphericalUniform
 from tnbbeta_vae.models.heads import (
-    gaussian_posterior,
-    tnbbeta_posterior,
-    vmf_posterior,
+    LatentFamily,
+    head_size,
+    posterior_from_raw,
+    standard_prior,
 )
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
-from tnbbeta_vae.models.priors.tnbbeta_spherical import (
-    FixedTNBBetaSphericalPrior,
-    uniform_prior_params,
-)
 from tnbbeta_vae.registry import register_model
 
 __all__ = ["MlpVAE", "MlpVAEConfig"]
@@ -45,7 +39,7 @@ class MlpVAEConfig(BaseModel):
         num_elbo_samples: ``z ~ q(z|x)`` draws averaged per ELBO estimate.
     """
 
-    family: Literal["gaussian", "vmf", "tnbbeta"] = "tnbbeta"
+    family: LatentFamily = "tnbbeta"
     input_dim: int = 100
     hidden_dims: list[int] = [256, 128]
     latent_dim: int = 2
@@ -66,22 +60,14 @@ class MlpVAE(nn.Module):
         super().__init__()
         self.config = config
         self.encoder = _mlp([config.input_dim, *config.hidden_dims])
-        head_sizes = {
-            "gaussian": 2 * config.latent_dim,
-            "vmf": config.latent_dim + 1,
-            "tnbbeta": config.latent_dim + 3,
-        }
         self.posterior_head = nn.Linear(
-            config.hidden_dims[-1], head_sizes[config.family]
+            config.hidden_dims[-1], head_size(config.family, config.latent_dim)
         )
         self.decoder = nn.Sequential(
             _mlp([config.latent_dim, *reversed(config.hidden_dims)]),
             nn.Linear(config.hidden_dims[0], config.input_dim),
         )
         self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
-        self.tnbbeta_prior = FixedTNBBetaSphericalPrior(
-            config.latent_dim, *uniform_prior_params(config.latent_dim)
-        )
 
     def forward(self, x: Tensor) -> tuple[Tensor, Distribution, Tensor]:
         """Runs a full encode -> sample -> decode pass.
@@ -157,28 +143,11 @@ class MlpVAE(nn.Module):
 
     def _encode(self, x: Tensor) -> Distribution:
         raw = self.posterior_head(self.encoder(x))
-        if self.config.family == "gaussian":
-            return gaussian_posterior(raw)
-        if self.config.family == "vmf":
-            return vmf_posterior(raw[..., :-1], raw[..., -1:])
-        return tnbbeta_posterior(raw, self.config.latent_dim)
+        return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
 
     def _prior(self) -> Distribution:
-        weight = self.posterior_head.weight
-        if self.config.family == "gaussian":
-            shape = (self.config.latent_dim,)
-            return Independent(
-                Normal(
-                    torch.zeros(shape, device=weight.device),
-                    torch.ones(shape, device=weight.device),
-                ),
-                1,
-            )
-        if self.config.family == "vmf":
-            return HypersphericalUniform(
-                self.config.latent_dim - 1, device=weight.device
-            )
-        return self.tnbbeta_prior()
+        device = self.posterior_head.weight.device
+        return standard_prior(self.config.family, self.config.latent_dim, device)
 
 
 def _mlp(sizes: list[int]) -> nn.Sequential:

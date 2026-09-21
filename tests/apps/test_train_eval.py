@@ -14,6 +14,11 @@ from apps.eval import main as eval_main
 from apps.train import main as train_main
 from tnbbeta_vae.data.cifar10 import Cifar10Images
 from tnbbeta_vae.data.mnist import MnistImages
+from tnbbeta_vae.training.device import (
+    NO_GPU_EXIT_CODE,
+    SLURM_GPU_VARIABLES,
+    select_device,
+)
 
 _MODELS = [
     ("conv_gaussian_vae", []),
@@ -105,19 +110,19 @@ def test_select_device_refuses_a_silent_cpu_fallback_under_slurm(
     monkeypatch.setenv("SLURM_JOB_GPUS", "0")
 
     with pytest.raises(SystemExit) as excinfo:
-        train_main._select_device(None)
-    assert excinfo.value.code == train_main.NO_GPU_EXIT_CODE
-    assert train_main._select_device("cpu").type == "cpu"
+        select_device(None)
+    assert excinfo.value.code == NO_GPU_EXIT_CODE
+    assert select_device("cpu").type == "cpu"
 
 
 def test_select_device_uses_cpu_when_no_gpu_was_requested(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
-    for name in train_main._SLURM_GPU_VARIABLES:
+    for name in SLURM_GPU_VARIABLES:
         monkeypatch.delenv(name, raising=False)
 
-    assert train_main._select_device(None).type == "cpu"
+    assert select_device(None).type == "cpu"
 
 
 @pytest.mark.parametrize(("model", "extra"), _MODELS)
