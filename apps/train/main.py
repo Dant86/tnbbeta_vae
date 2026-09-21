@@ -41,7 +41,7 @@ from tnbbeta_vae.registry import (
     get_registered_model,
     list_registered_models,
 )
-from tnbbeta_vae.training import Trainer, select_device
+from tnbbeta_vae.training import Trainer, require_readable_storage, select_device
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -123,6 +123,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.dataset == "mnist":
         overrides = {**_MNIST_MODEL_DEFAULTS, **overrides}
 
+    require_readable_storage(checkpoint_dir(), data_dir(), runs_dir())
     checkpoints = checkpoint_dir() / args.run_name if args.run_name else None
     if args.resume and checkpoints and (checkpoints / "final.pt").exists():
         print(f"{args.run_name}: already complete ({checkpoints / 'final.pt'}).")
