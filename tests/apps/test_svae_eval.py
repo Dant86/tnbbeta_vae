@@ -135,19 +135,30 @@ def test_table_skips_missing_runs_and_shows_dashes(
 
 
 @pytest.mark.parametrize(
-    ("task", "run_name", "model", "dim", "seed"),
+    ("task", "run_name", "model", "dim", "seed", "latent"),
     [
-        (0, "mnist_gauss_d2_seed0", "conv_gaussian_vae", "2", "0"),
-        (4, "mnist_gauss_d2_seed4", "conv_gaussian_vae", "2", "4"),
-        (5, "mnist_gauss_d5_seed0", "conv_gaussian_vae", "5", "0"),
-        (30, "mnist_vmf_d2_seed0", "conv_vmf_vae", "2", "0"),
-        (89, "mnist_tnb_d128_seed4", "conv_tnbbeta_spherical_vae", "128", "4"),
-        (90, "mnist_vmfk_d2_seed0", "conv_vmf_vae", "2", "0"),
-        (114, "mnist_vmfk_d40_seed4", "conv_vmf_vae", "40", "4"),
+        (0, "mnist_gauss_d2_seed0", "conv_gaussian_vae", "2", "0", "2"),
+        (4, "mnist_gauss_d2_seed4", "conv_gaussian_vae", "2", "4", "2"),
+        (5, "mnist_gauss_d5_seed0", "conv_gaussian_vae", "5", "0", "5"),
+        (30, "mnist_vmf_d2_seed0", "conv_vmf_vae", "2", "0", "2"),
+        (89, "mnist_tnb_d128_seed4", "conv_tnbbeta_spherical_vae", "128", "4", "128"),
+        (90, "mnist_vmfk_d2_seed0", "conv_vmf_vae", "2", "0", "2"),
+        (114, "mnist_vmfk_d40_seed4", "conv_vmf_vae", "40", "4", "40"),
+        (120, "mnist_vmfs_d2_seed0", "conv_vmf_vae", "2", "0", "3"),
+        (144, "mnist_vmfs_d40_seed4", "conv_vmf_vae", "40", "4", "41"),
+        (150, "mnist_tnbs_d2_seed0", "conv_tnbbeta_spherical_vae", "2", "0", "3"),
+        (180, "mnist_vmfks_d2_seed0", "conv_vmf_vae", "2", "0", "3"),
+        (204, "mnist_vmfks_d40_seed4", "conv_vmf_vae", "40", "4", "41"),
     ],
 )
 def test_sweep_script_maps_array_index_to_model_dim_seed(
-    tmp_path: Path, task: int, run_name: str, model: str, dim: str, seed: str
+    tmp_path: Path,
+    task: int,
+    run_name: str,
+    model: str,
+    dim: str,
+    seed: str,
+    latent: str,
 ) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -173,13 +184,13 @@ def test_sweep_script_maps_array_index_to_model_dim_seed(
     assert result.returncode == 0, result.stderr
     train_call, eval_call, knn_call = log.read_text().splitlines()
     assert f"--model {model} --run-name {run_name}" in train_call
-    assert f"--set latent_dim={dim}" in train_call
+    # The run name carries the paper's d; sphere models named "...s" get ambient d + 1.
+    assert f"--set latent_dim={latent} " in train_call
     assert f"--seed {seed}" in train_call
     assert "--patience 50 --kl-warmup-epochs 100" in train_call
-    # Only the corrected vMF variant starts at kappa = the latent dimension.
-    assert ("--set initial_kappa=" + dim in train_call) == run_name.startswith(
-        "mnist_vmfk"
-    )
+    # Only the corrected vMF variants start at kappa = their ambient dimension.
+    corrected = run_name.startswith(("mnist_vmfk_", "mnist_vmfks_"))
+    assert (f"--set initial_kappa={latent}" in train_call) == corrected
     assert f"apps.eval.svae_metrics --run-name {run_name}" in eval_call
     assert f"apps.eval.svae_knn --run-name {run_name}" in knn_call
 

@@ -26,7 +26,15 @@ from scipy import stats
 
 from tnbbeta_vae.paths import checkpoint_dir
 
-MODEL_TITLES = {"gauss": "N-VAE", "vmf": "S-VAE (vMF)", "tnb": "TNBBeta"}
+MODEL_TITLES = {
+    "gauss": "N-VAE",
+    "vmf": "S-VAE (vMF)",
+    "tnb": "TNBBeta",
+    "vmfk": "S-VAE (vMF, kappa init)",
+    "vmfs": "S-VAE (vMF, S^d)",
+    "tnbs": "TNBBeta (S^d)",
+    "vmfks": "S-VAE (vMF, kappa init, S^d)",
+}
 _TABLE1_METRICS = [("ll", "LL"), ("elbo", "L[q]"), ("re", "RE"), ("kl", "KL")]
 _KNN_METRICS = [("acc_100", "N=100"), ("acc_600", "N=600"), ("acc_1000", "N=1000")]
 _BOLDABLE = {"ll", "elbo", "re", "acc_100", "acc_600", "acc_1000"}
