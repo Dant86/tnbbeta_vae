@@ -46,8 +46,11 @@ _PARAM_EPS = 1e-4
 # staying above what float32 can resolve near 1 (about 1e-7).
 _PQ_CLAMP = 1e-6
 _LOG_VAR_BOUND = 10.0
-# exp parameterization: cap log(kappa - 1) so kappa stays finite (about 5e8).
-_MAX_LOG_KAPPA = 20.0
+# In float32 the vMF log-normalizer and KL lose all precision as kappa grows: the KL is
+# still accurate to ~0.01 nats at 1e6, wrong by ~0.4 at 1e7, and at ~5e8 it collapses to
+# log(2 pi) while the sample's cosine with its mean is exactly 1. Beyond this cap kappa
+# is meaningless, so it is clamped (no reference-style run has come near it).
+_MAX_KAPPA = 1e6
 
 
 def tnbbeta_posterior(raw: Tensor, latent_dim: int) -> TNBBetaSpherical:
@@ -97,20 +100,20 @@ def vmf_kappa(
 
     ``"softplus"`` (the reference S-VAE) is ``softplus(raw) + 1``: linear in ``raw`` for
     large kappa, so reaching a large concentration needs a proportionally large raw
-    output, and it grows slowly. ``"exp"`` is ``1 + exp(raw)`` (raw capped at 20), which
-    grows multiplicatively.
+    output, and it grows slowly. ``"exp"`` is ``1 + exp(raw)``, which grows
+    multiplicatively. Both are clamped at ``1e6``, the float32 limit (see above).
     """
     if parameterization == "exp":
-        return 1 + raw.clamp(max=_MAX_LOG_KAPPA).exp()
-    return nn.functional.softplus(raw) + 1
+        return (1 + raw.clamp(max=math.log(_MAX_KAPPA)).exp()).clamp(max=_MAX_KAPPA)
+    return (nn.functional.softplus(raw) + 1).clamp(max=_MAX_KAPPA)
 
 
 def vmf_kappa_inverse(
     kappa: float, parameterization: KappaParameterization = "softplus"
 ) -> float:
-    """Returns the raw output that :func:`vmf_kappa` maps to ``kappa`` (kappa > 1)."""
-    if kappa <= 1:
-        raise ValueError(f"kappa must be greater than 1; got {kappa}.")
+    """Returns the raw output that :func:`vmf_kappa` maps to ``kappa`` (in (1, 1e6))."""
+    if not 1 < kappa < _MAX_KAPPA:
+        raise ValueError(f"kappa must be in (1, {_MAX_KAPPA:g}); got {kappa}.")
     excess = kappa - 1
     if parameterization == "exp":
         return math.log(excess)

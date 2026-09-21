@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pytest
@@ -83,9 +84,10 @@ def test_initial_kappa_sets_where_every_posterior_starts(parameterization: str) 
     assert (kappas > 10).all()
 
 
-def test_initial_kappa_must_exceed_one() -> None:
-    with pytest.raises(ValueError, match="greater than 1"):
-        _kappas(initial_kappa=1.0)
+@pytest.mark.parametrize("bad", [1.0, 0.5, 2e6])
+def test_initial_kappa_must_be_between_one_and_the_float32_cap(bad: float) -> None:
+    with pytest.raises(ValueError, match=r"kappa must be in \(1, 1e\+06\)"):
+        _kappas(initial_kappa=bad)
 
 
 @pytest.mark.parametrize("parameterization", ["softplus", "exp"])
@@ -99,16 +101,43 @@ def test_kappa_inverse_round_trips(parameterization: str, kappa: float) -> None:
     assert vmf_kappa(raw, param).item() == pytest.approx(kappa, rel=1e-4)
 
 
-def test_exp_parameterization_grows_multiplicatively_and_is_capped() -> None:
+def test_exp_parameterization_grows_multiplicatively() -> None:
     from tnbbeta_vae.models.heads import vmf_kappa
 
-    raw = torch.tensor([0.0, 5.0, 10.0, 100.0])
+    raw = torch.tensor([0.0, 5.0, 10.0])
 
-    exp = vmf_kappa(raw, "exp")
-    softplus = vmf_kappa(raw, "softplus")
+    assert vmf_kappa(raw, "exp")[2] > 20_000 > vmf_kappa(raw, "softplus")[2]
 
-    assert exp[2] > 20_000 > softplus[2]
-    assert torch.isfinite(exp).all() and exp[3] == exp[3].clamp(max=1e9)
+
+@pytest.mark.parametrize("parameterization", ["softplus", "exp"])
+def test_kappa_is_capped_where_float32_stops_being_meaningful(
+    parameterization: str,
+) -> None:
+    from tnbbeta_vae.models.heads import vmf_kappa
+
+    param: Any = parameterization
+
+    kappa = vmf_kappa(torch.tensor([50.0, 1e9]), param)
+
+    assert kappa.max().item() == pytest.approx(1e6)
+    assert torch.isfinite(kappa).all()
+
+
+def test_the_analytic_kl_is_accurate_up_to_the_cap() -> None:
+    from torch.distributions import kl_divergence
+
+    from tnbbeta_vae.distributions import HypersphericalUniform, VonMisesFisher
+    from tnbbeta_vae.models.heads import vmf_kappa
+
+    loc = torch.zeros(4, 2)
+    loc[:, 0] = 1.0
+    kappa = vmf_kappa(torch.tensor([[1e9]] * 4), "exp")  # clamped to the cap
+
+    kl = kl_divergence(VonMisesFisher(loc, kappa), HypersphericalUniform(1))
+
+    # d=2: KL = 0.5 ln(2 pi kappa / e) for large kappa.
+    expected = 0.5 * math.log(2 * math.pi * 1e6 / math.e)
+    assert kl.mean().item() == pytest.approx(expected, abs=0.05)
 
 
 def test_a_training_step_with_the_exp_parameterization_has_finite_gradients() -> None:

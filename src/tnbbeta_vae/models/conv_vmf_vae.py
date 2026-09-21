@@ -52,11 +52,12 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
             estimate (the KL is exact, so this only affects the
             likelihood term).
         initial_kappa: If set, initializes the concentration head's bias so every
-            posterior starts near this kappa (> 1). ``None`` keeps the reference
-            initialization (kappa near 1.7). The reference start is too noisy at high
-            latent dimension: a sample's expected cosine with its mean direction is only
-            about 0.04 at ``latent_dim=40``, the decoder learns to ignore z, and the
-            model collapses to the mean image. A kappa around ``latent_dim`` avoids it.
+            posterior starts near this kappa (between 1 and 1e6). ``None`` keeps the
+            reference initialization (kappa near 1.7). That start is too noisy at high
+            latent dimension: a sample's expected cosine with its mean direction is
+            only about 0.04 at ``latent_dim=40``, the decoder learns to ignore z, and
+            the model collapses to the mean image. A kappa around ``latent_dim``
+            avoids it.
         kappa_parameterization: ``"softplus"`` (reference) or ``"exp"``; see
             :func:`tnbbeta_vae.models.heads.vmf_kappa`.
     """
