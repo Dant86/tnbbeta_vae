@@ -7,7 +7,10 @@
 #   3 models x 6 latent dims x 5 seeds = 90 tasks -> 0-89
 # Submit from the repo root:  sbatch scripts/slurm/mnist_sweep.sbatch
 # MNIST must already be downloaded (apps.data.download_mnist). Safe to resubmit: the
-# training step resumes, and finished runs are skipped. Rerun failed tasks with
+# training step resumes, and finished runs are skipped. A task that lands on a node with
+# no usable GPU resubmits itself excluding that node (scripts/slurm/no_gpu_retry.sh, up to
+# 5 attempts); the attempt just made shows as COMPLETED in sacct, with a "resubmitting"
+# line in its .err file. Rerun other failed tasks with
 #   sbatch --exclude=k002 --array=<ids> scripts/slurm/mnist_sweep.sbatch
 #SBATCH --job-name=mnist-sweep
 #SBATCH --partition=general
@@ -22,6 +25,7 @@
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR}"
+source "${SLURM_SUBMIT_DIR}/scripts/slurm/no_gpu_retry.sh"
 
 MODELS=(conv_gaussian_vae conv_vmf_vae conv_tnbbeta_spherical_vae)
 SHORT_NAMES=(gauss vmf tnb)
@@ -38,11 +42,21 @@ MODEL="${MODELS[$i]}"
 RUN_NAME="mnist_${SHORT_NAMES[$i]}_d${DIM}_seed${SEED}"
 echo "Task ${SLURM_ARRAY_TASK_ID}: ${RUN_NAME}"
 
+set +e
 uv run --no-sync python -m apps.train.main \
     --model "${MODEL}" --run-name "${RUN_NAME}" --resume --dataset mnist \
     --set latent_dim="${DIM}" --set hidden_channels="${HIDDEN_CHANNELS}" \
     --batch-size 64 --epochs 1000 --patience 50 --kl-warmup-epochs 100 \
     --seed "${SEED}" --num-workers "${SLURM_CPUS_PER_TASK:-4}"
+STATUS=$?
+set -e
+
+if resubmit_if_no_gpu "${STATUS}" "${SLURM_SUBMIT_DIR}/scripts/slurm/mnist_sweep.sbatch"; then
+    exit 0
+fi
+if [[ "${STATUS}" -ne 0 ]]; then
+    exit "${STATUS}"
+fi
 
 uv run --no-sync python -m apps.eval.svae_metrics --run-name "${RUN_NAME}" \
     --num-workers "${SLURM_CPUS_PER_TASK:-4}"
