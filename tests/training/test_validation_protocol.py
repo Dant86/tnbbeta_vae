@@ -129,3 +129,35 @@ def test_without_validation_final_is_the_last_state(tmp_path: Path) -> None:
 
     assert not (tmp_path / "ckpt" / "best.pt").exists()
     assert torch.load(tmp_path / "ckpt" / "final.pt")["epochs_completed"] == 2
+
+
+class _NanAfterModel(nn.Module):
+    """Healthy for ``healthy_steps`` training steps, then a NaN loss."""
+
+    def __init__(self, healthy_steps: int) -> None:
+        super().__init__()
+        self.linear = nn.Linear(4, 1)
+        self._healthy_steps = healthy_steps
+        self.calls = 0
+
+    def training_step(self, batch: torch.Tensor) -> dict[str, torch.Tensor]:
+        self.calls += 1
+        loss = self.linear(batch).pow(2).mean()
+        if self.calls > self._healthy_steps:
+            loss = loss * float("nan")
+        return {"loss": loss}
+
+
+def test_a_non_finite_loss_stops_before_updating_and_keeps_the_last_checkpoint(
+    tmp_path: Path,
+) -> None:
+    model = _NanAfterModel(healthy_steps=2)  # one epoch = 1 step: epoch 3 is NaN
+    trainer = _trainer(model, tmp_path)
+
+    with pytest.raises(FloatingPointError, match="step 2 .*epoch 2"):
+        trainer.fit(_TRAIN, num_epochs=10, checkpoint_dir=tmp_path / "ckpt")
+
+    latest = torch.load(tmp_path / "ckpt" / "latest.pt")
+    assert latest["epochs_completed"] == 2
+    assert all(torch.isfinite(v).all() for v in latest["model_state_dict"].values())
+    assert all(torch.isfinite(p).all() for p in model.parameters())

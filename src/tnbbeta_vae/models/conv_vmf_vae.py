@@ -19,11 +19,7 @@ from torch import Tensor, nn
 
 from tnbbeta_vae.distributions import HypersphericalUniform, VonMisesFisher
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
-from tnbbeta_vae.models.heads import (
-    KappaParameterization,
-    vmf_kappa_inverse,
-    vmf_posterior,
-)
+from tnbbeta_vae.models.heads import vmf_kappa_inverse, vmf_posterior
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.registry import register_model
@@ -58,8 +54,6 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
             only about 0.04 at ``latent_dim=40``, the decoder learns to ignore z, and
             the model collapses to the mean image. A kappa around ``latent_dim``
             avoids it.
-        kappa_parameterization: ``"softplus"`` (reference) or ``"exp"``; see
-            :func:`tnbbeta_vae.models.heads.vmf_kappa`.
     """
 
     image_channels: int = 3
@@ -70,7 +64,6 @@ class ConvVonMisesFisherVAEConfig(BaseModel):
     likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
     initial_kappa: float | None = None
-    kappa_parameterization: KappaParameterization = "softplus"
 
 
 @register_model("conv_vmf_vae", config_cls=ConvVonMisesFisherVAEConfig)
@@ -103,7 +96,7 @@ class ConvVonMisesFisherVAE(nn.Module):
         )
         self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
         if config.initial_kappa is not None:
-            raw = vmf_kappa_inverse(config.initial_kappa, config.kappa_parameterization)
+            raw = vmf_kappa_inverse(config.initial_kappa)
             with torch.no_grad():
                 self.fc_var.bias.fill_(raw)
 
@@ -201,11 +194,7 @@ class ConvVonMisesFisherVAE(nn.Module):
     def _encode(self, x: Tensor) -> VonMisesFisher:
         """Maps images to a per-example von Mises-Fisher posterior."""
         features = self.encoder(x)
-        return vmf_posterior(
-            self.fc_mean(features),
-            self.fc_var(features),
-            self.config.kappa_parameterization,
-        )
+        return vmf_posterior(self.fc_mean(features), self.fc_var(features))
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:
         """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""

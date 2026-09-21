@@ -24,7 +24,6 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 __all__ = [
-    "KappaParameterization",
     "LatentFamily",
     "gaussian_posterior",
     "head_size",
@@ -38,7 +37,6 @@ __all__ = [
 ]
 
 LatentFamily = Literal["gaussian", "vmf", "tnbbeta"]
-KappaParameterization = Literal["softplus", "exp"]
 
 _PARAM_EPS = 1e-4
 # Bounds for the posterior's p and q. A clamped value passes no gradient; 1e-6 keeps
@@ -73,50 +71,35 @@ def tnbbeta_posterior(raw: Tensor, latent_dim: int) -> TNBBetaSpherical:
     return TNBBetaSpherical(mean_direction, p, q, epsilon)
 
 
-def vmf_posterior(
-    raw_mean: Tensor,
-    raw_kappa: Tensor,
-    parameterization: KappaParameterization = "softplus",
-) -> VonMisesFisher:
+def vmf_posterior(raw_mean: Tensor, raw_kappa: Tensor) -> VonMisesFisher:
     """Builds a von Mises-Fisher posterior as in the reference S-VAE.
 
     Args:
         raw_mean: Unnormalized mean direction, shape ``(batch, latent_dim)``.
         raw_kappa: Raw concentration, shape ``(batch, 1)``.
-        parameterization: How the raw output maps to kappa, see :func:`vmf_kappa`.
 
     Returns:
         A batch of posteriors with unit mean direction and concentration
-        ``vmf_kappa(raw_kappa, parameterization)``.
+        ``vmf_kappa(raw_kappa)``.
     """
-    mean = _unit_direction(raw_mean)
-    return VonMisesFisher(mean, vmf_kappa(raw_kappa, parameterization))
+    return VonMisesFisher(_unit_direction(raw_mean), vmf_kappa(raw_kappa))
 
 
-def vmf_kappa(
-    raw: Tensor, parameterization: KappaParameterization = "softplus"
-) -> Tensor:
-    """Maps a raw network output to a concentration kappa > 1.
+def vmf_kappa(raw: Tensor) -> Tensor:
+    """Maps a raw network output to a concentration: ``softplus(raw) + 1``, at most 1e6.
 
-    ``"softplus"`` (the reference S-VAE) is ``softplus(raw) + 1``: linear in ``raw`` for
-    large kappa, so reaching a large concentration needs a proportionally large raw
-    output, and it grows slowly. ``"exp"`` is ``1 + exp(raw)``, which grows
-    multiplicatively. Both are clamped at ``1e6``, the float32 limit (see above).
+    The mapping is the reference S-VAE's. It is linear in ``raw`` for large kappa, so a
+    large concentration needs a proportionally large raw output. The cap is the float32
+    limit described above.
     """
-    if parameterization == "exp":
-        return (1 + raw.clamp(max=math.log(_MAX_KAPPA)).exp()).clamp(max=_MAX_KAPPA)
     return (nn.functional.softplus(raw) + 1).clamp(max=_MAX_KAPPA)
 
 
-def vmf_kappa_inverse(
-    kappa: float, parameterization: KappaParameterization = "softplus"
-) -> float:
+def vmf_kappa_inverse(kappa: float) -> float:
     """Returns the raw output that :func:`vmf_kappa` maps to ``kappa`` (in (1, 1e6))."""
     if not 1 < kappa < _MAX_KAPPA:
         raise ValueError(f"kappa must be in (1, {_MAX_KAPPA:g}); got {kappa}.")
     excess = kappa - 1
-    if parameterization == "exp":
-        return math.log(excess)
     # softplus^-1(x) = log(expm1(x)), which is x itself once exp(-x) is negligible.
     return excess if excess > 30 else math.log(math.expm1(excess))
 

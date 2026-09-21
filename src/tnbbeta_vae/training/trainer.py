@@ -136,6 +136,7 @@ class Trainer[BatchT]:
                 else:
                     outputs = self.model.training_step(batch)
                 outputs["loss"].backward()
+                self._require_finite(outputs["loss"], epoch)
                 self.optimizer.step()
 
                 metrics = {k: v.item() for k, v in outputs.items()}
@@ -195,6 +196,28 @@ class Trainer[BatchT]:
         self.step = checkpoint["step"]
         self.best_val_loss = checkpoint.get("best_val_loss", math.inf)
         self.epochs_since_improvement = checkpoint.get("epochs_since_improvement", 0)
+
+    def _require_finite(self, loss: torch.Tensor, epoch: int) -> None:
+        """Raises before the optimizer step if the loss or any gradient is not finite.
+
+        Stepping on a NaN gradient would put NaN into every weight, and the next
+        epoch's checkpoint would then make ``--resume`` crash forever. Failing here
+        leaves the last epoch's checkpoint intact.
+        """
+        gradients = [
+            p.grad
+            for group in self.optimizer.param_groups
+            for p in group["params"]
+            if p.grad is not None
+        ]
+        finite = torch.isfinite(loss) and all(
+            bool(torch.isfinite(g).all()) for g in gradients
+        )
+        if not finite:
+            raise FloatingPointError(
+                f"Non-finite loss or gradient at step {self.step} (epoch {epoch}); "
+                "stopped before the update, so the latest checkpoint is intact."
+            )
 
     @torch.no_grad()
     def _validate(self, val_dataloader: Iterable[BatchT]) -> float:

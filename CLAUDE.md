@@ -65,6 +65,13 @@ automatically on commit, excluding `notebooks/`.
   not a place for new knobs. All three conv VAEs share `posterior_and_prior` and
   `log_likelihood`, which `models/losses/importance_weighted.py` uses to compute the
   paper's Table 1 metrics.
+- Sphere models' `latent_dim` is the AMBIENT dimension (S^(latent_dim - 1) in R^latent_dim).
+  The S-VAE paper's "d" is the manifold dimension: its d=2 S-VAE is S^2 in R^3 (Figure 2 shows
+  a Hammer projection of S^2, and the reference code trains the vMF model with `z_dim + 1`).
+  To compare with the paper at the same d as the Gaussian, give the sphere models
+  `latent_dim = d + 1` (the sweep's `vmfs`/`tnbs`/`vmfks` models); at equal `latent_dim` the
+  sphere has one degree of freedom fewer than the Gaussian. The vMF head also needs a
+  dimension-aware `initial_kappa` (about the ambient dimension) at high d, or it collapses.
 - MNIST (`--dataset mnist`) uses a Bernoulli likelihood on dynamically binarized images
   (`likelihood="bernoulli"`, set automatically), 28x28 padded to 32 inside the conv
   encoder/decoder, a 50k/10k train/val split, per-epoch validation, KL warm-up and early
