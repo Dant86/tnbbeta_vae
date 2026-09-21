@@ -2,18 +2,38 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import functools
+from typing import TYPE_CHECKING, Literal
 
 import torch
-from torch import Tensor, nn
-from torch.distributions import Independent, Normal
+from torch import nn
+from torch.distributions import Distribution, Independent, Normal
 
-from tnbbeta_vae.distributions import TNBBetaSpherical, VonMisesFisher
+from tnbbeta_vae.distributions import (
+    HypersphericalUniform,
+    TNBBetaSpherical,
+    VonMisesFisher,
+)
+from tnbbeta_vae.models.priors.tnbbeta_spherical import (
+    FixedTNBBetaSphericalPrior,
+    uniform_prior_params,
+)
 
 if TYPE_CHECKING:
     from torch import Tensor
 
-__all__ = ["gaussian_posterior", "tnbbeta_posterior", "vmf_posterior"]
+__all__ = [
+    "LatentFamily",
+    "gaussian_posterior",
+    "head_size",
+    "posterior_centre",
+    "posterior_from_raw",
+    "standard_prior",
+    "tnbbeta_posterior",
+    "vmf_posterior",
+]
+
+LatentFamily = Literal["gaussian", "vmf", "tnbbeta"]
 
 _PARAM_EPS = 1e-4
 # Bounds for the posterior's p and q. A clamped value passes no gradient; 1e-6 keeps
@@ -70,6 +90,88 @@ def gaussian_posterior(raw: Tensor) -> Independent:
     mu, log_var = raw.chunk(2, dim=-1)
     sigma = (0.5 * log_var.clamp(-_LOG_VAR_BOUND, _LOG_VAR_BOUND)).exp()
     return Independent(Normal(mu, sigma), 1)
+
+
+def head_size(family: LatentFamily, latent_dim: int) -> int:
+    """Returns how many raw outputs a head needs for ``family`` at ``latent_dim``."""
+    return {
+        "gaussian": 2 * latent_dim,
+        "vmf": latent_dim + 1,
+        "tnbbeta": latent_dim + 3,
+    }[family]
+
+
+def posterior_from_raw(
+    family: LatentFamily, raw: Tensor, latent_dim: int
+) -> Distribution:
+    """Builds a distribution of ``family`` from ``head_size`` raw outputs per row.
+
+    Args:
+        family: ``"gaussian"``, ``"vmf"`` or ``"tnbbeta"``.
+        raw: Raw outputs, shape ``(..., head_size(family, latent_dim))``.
+        latent_dim: Latent dimension (ambient dimension for the sphere families).
+
+    Returns:
+        A batch of distributions over ``latent_dim``-dimensional vectors.
+    """
+    if family == "gaussian":
+        return gaussian_posterior(raw)
+    if family == "vmf":
+        return vmf_posterior(raw[..., :-1], raw[..., -1:])
+    return tnbbeta_posterior(raw, latent_dim)
+
+
+def posterior_centre(family: LatentFamily, distribution: Distribution) -> Tensor:
+    """Returns a posterior's centre: the mean, or the mode direction on a sphere.
+
+    For TNBBeta the centre is the mean direction, negated when p < 0.5, which undoes
+    the (mu, p) ~ (-mu, 1 - p) alias.
+
+    Args:
+        family: The family ``distribution`` was built with.
+        distribution: A batch built by :func:`posterior_from_raw`.
+
+    Returns:
+        Tensor of shape ``(..., latent_dim)``.
+    """
+    if family == "gaussian":
+        return distribution.base_dist.loc  # pyright: ignore[reportAttributeAccessIssue]
+    if family == "vmf":
+        return distribution.loc  # pyright: ignore[reportAttributeAccessIssue]
+    direction = distribution.mean_direction  # pyright: ignore[reportAttributeAccessIssue]
+    flip = distribution.p > 0.5  # pyright: ignore[reportAttributeAccessIssue]
+    return torch.where(flip[..., None], direction, -direction)
+
+
+def standard_prior(
+    family: LatentFamily, latent_dim: int, device: torch.device
+) -> Distribution:
+    """Returns the family's standard prior: N(0, I), or uniform on the sphere.
+
+    Args:
+        family: ``"gaussian"``, ``"vmf"`` or ``"tnbbeta"``.
+        latent_dim: Latent dimension.
+        device: Device for the distribution's parameters.
+
+    Returns:
+        ``N(0, I)`` for the Gaussian, ``HypersphericalUniform`` for vMF and the
+        uniform-sphere TNBBetaSpherical (p = 0.5, q = 0, epsilon = (d - 1) / 2) for
+        TNBBeta.
+    """
+    if family == "gaussian":
+        zeros = torch.zeros(latent_dim, device=device)
+        return Independent(Normal(zeros, torch.ones_like(zeros)), 1)
+    if family == "vmf":
+        return HypersphericalUniform(latent_dim - 1, device=device)
+    return _tnbbeta_uniform_prior(latent_dim, device)()
+
+
+@functools.cache
+def _tnbbeta_uniform_prior(
+    latent_dim: int, device: torch.device
+) -> FixedTNBBetaSphericalPrior:
+    prior = FixedTNBBetaSphericalPrior(latent_dim, *uniform_prior_params(latent_dim))
+    return prior.to(device)
 
 
 def _unit_direction(raw: Tensor) -> Tensor:

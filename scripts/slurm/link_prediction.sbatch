@@ -4,7 +4,9 @@
 # (3 learning rates x 3 dropouts x 3 latent dims, 5 seeds each) and writes
 # $TNBBETA_CHECKPOINT_DIR/link_prediction/<dataset>_<family>.json.
 #   3 datasets x 3 families = 9 tasks -> 0-8
-# The Planetoid files must already be downloaded (apps.data.download_planetoid).
+# The Planetoid files must already be downloaded (apps.data.download_planetoid). A task
+# that lands on a node with no usable GPU resubmits itself excluding that node
+# (scripts/slurm/no_gpu_retry.sh, up to 5 attempts).
 # Submit from the repo root:  sbatch scripts/slurm/link_prediction.sbatch
 # Then print the table:  uv run python -m apps.link_prediction.table
 #SBATCH --job-name=link-prediction
@@ -20,6 +22,7 @@
 
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR}"
+source "${SLURM_SUBMIT_DIR}/scripts/slurm/no_gpu_retry.sh"
 
 DATASETS=(cora citeseer pubmed)
 FAMILIES=(gaussian vmf tnbbeta)
@@ -29,4 +32,12 @@ FAMILY="${FAMILIES[$((i % ${#FAMILIES[@]}))]}"
 DATASET="${DATASETS[$((i / ${#FAMILIES[@]}))]}"
 echo "Task ${SLURM_ARRAY_TASK_ID}: ${DATASET} ${FAMILY}"
 
+set +e
 uv run --no-sync python -m apps.link_prediction.main --dataset "${DATASET}" --family "${FAMILY}"
+STATUS=$?
+set -e
+
+if resubmit_if_no_gpu "${STATUS}" "${SLURM_SUBMIT_DIR}/scripts/slurm/link_prediction.sbatch"; then
+    exit 0
+fi
+exit "${STATUS}"

@@ -122,9 +122,42 @@ def render(
         for model in models:
             for name, _ in metrics:
                 values = results.get((model, dim), {}).get(name, [])
-                cells.append(_format(values, winners.get(name) == model))
+                cells.append(format_mean_std(values, winners.get(name) == model))
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+def significant_winner(series: dict[str, list[float]], alpha: float) -> str | None:
+    """Returns the key with the highest mean if a Welch t-test beats every other one.
+
+    Args:
+        series: Values (one per seed) for each competitor; higher is better.
+        alpha: Significance level.
+
+    Returns:
+        The winning key, or ``None`` if a competitor has fewer than two values or the
+        best one does not beat every other significantly.
+    """
+    usable = {name: values for name, values in series.items() if len(values) >= 2}
+    if len(usable) < 2 or len(usable) < len(series):
+        return None
+    best = max(usable, key=lambda name: float(np.mean(usable[name])))
+    for name, values in usable.items():
+        if name == best:
+            continue
+        test: Any = stats.ttest_ind(usable[best], values, equal_var=False)
+        if not (float(test.pvalue) < alpha and np.mean(usable[best]) > np.mean(values)):
+            return None
+    return best
+
+
+def format_mean_std(values: list[float], bold: bool, scale: float = 1.0) -> str:
+    """Formats ``mean ± std`` (bold if ``bold``), or ``-`` if there are no values."""
+    if not values:
+        return "-"
+    spread = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+    text = f"{scale * np.mean(values):.2f} ± {scale * spread:.2f}"
+    return f"**{text}**" if bold else text
 
 
 def _significant_winner(
@@ -132,26 +165,7 @@ def _significant_winner(
 ) -> str | None:
     """Returns the model with the best mean if it beats all others at ``alpha``."""
     series = {model: results.get((model, dim), {}).get(metric, []) for model in models}
-    usable = {model: values for model, values in series.items() if len(values) >= 2}
-    if len(usable) < 2 or len(usable) < len(models):
-        return None
-    best = max(usable, key=lambda model: float(np.mean(usable[model])))
-    for model, values in usable.items():
-        if model == best:
-            continue
-        test: Any = stats.ttest_ind(usable[best], values, equal_var=False)
-        pvalue = float(test.pvalue)
-        if not (pvalue < alpha and np.mean(usable[best]) > np.mean(values)):
-            return None
-    return best
-
-
-def _format(values: list[float], bold: bool) -> str:
-    if not values:
-        return "-"
-    spread = float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
-    text = f"{np.mean(values):.2f} ± {spread:.2f}"
-    return f"**{text}**" if bold else text
+    return significant_winner(series, alpha)
 
 
 if __name__ == "__main__":

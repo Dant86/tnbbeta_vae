@@ -18,6 +18,7 @@ from tnbbeta_vae.models.conv_vmf_vae import (
 from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
 from tnbbeta_vae.models.graph_vae import GraphBatch, GraphVAE, GraphVAEConfig
 from tnbbeta_vae.models.mlp_vae import MlpVAE, MlpVAEConfig
+from tnbbeta_vae.models.semi_supervised import M1M2VAE, M1M2Config, SemiBatch
 
 __all__ = [
     "ConvGaussianVAE",
@@ -29,7 +30,10 @@ __all__ = [
     "GraphBatch",
     "GraphVAE",
     "GraphVAEConfig",
+    "M1M2Config",
+    "M1M2VAE",
     "MlpVAE",
     "MlpVAEConfig",
+    "SemiBatch",
     "tnbbeta_spherical_posterior_diagnostics",
 ]

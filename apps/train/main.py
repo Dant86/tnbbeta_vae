@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from typing import TYPE_CHECKING, cast
 
@@ -42,16 +41,13 @@ from tnbbeta_vae.registry import (
     get_registered_model,
     list_registered_models,
 )
-from tnbbeta_vae.training import Trainer
+from tnbbeta_vae.training import Trainer, select_device
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from torch import Tensor
 
-_SLURM_GPU_VARIABLES = ("SLURM_JOB_GPUS", "SLURM_GPUS_ON_NODE", "SLURM_STEP_GPUS")
-# EX_TEMPFAIL: scripts/slurm/train.sbatch resubmits the job on this exit code.
-NO_GPU_EXIT_CODE = 75
 _MNIST_MODEL_DEFAULTS = {
     "image_channels": "1",
     "image_size": "28",
@@ -133,7 +129,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     torch.manual_seed(args.seed)
-    device = _select_device(args.device)
+    device = select_device(args.device)
     model = cast("nn.Module", build_model(args.model, **overrides)).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     trainer = Trainer(
@@ -205,39 +201,6 @@ def _batches(
         pin_memory=device.type == "cuda",
     )
     return _OnDevice(loader, device), None
-
-
-def _select_device(requested: str | None) -> torch.device:
-    """Picks the training device, refusing a silent CPU fallback under Slurm.
-
-    If a GPU was allocated to the job but CUDA can't initialize (a node
-    problem), PyTorch quietly falls back to the CPU and the run crawls.
-    Failing here makes that visible immediately. An explicit ``--device``
-    is always honored.
-
-    Args:
-        requested: The ``--device`` argument, or ``None`` to choose.
-
-    Returns:
-        The device to train on.
-
-    Raises:
-        SystemExit: With ``NO_GPU_EXIT_CODE`` if a Slurm GPU was allocated but
-            CUDA is unavailable.
-    """
-    if requested is not None:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if any(os.environ.get(name) for name in _SLURM_GPU_VARIABLES):
-        print(
-            "Slurm allocated a GPU but CUDA is unavailable on this node; refusing "
-            "to fall back to the CPU. Resubmit, excluding this node (sbatch "
-            "--exclude=<node>), or pass --device cpu to train on the CPU anyway.",
-            file=sys.stderr,
-        )
-        raise SystemExit(NO_GPU_EXIT_CODE)
-    return torch.device("cpu")
 
 
 def _parse_overrides(pairs: list[str]) -> dict[str, str]:
