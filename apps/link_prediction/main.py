@@ -35,6 +35,7 @@ from tnbbeta_vae.data.planetoid import (
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
+from tnbbeta_vae.training import select_device
 
 _DEFAULT_EPOCHS = {"cora": 200, "citeseer": 200, "pubmed": 400}
 
@@ -59,9 +60,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--device", type=str, default=None)
     args = parser.parse_args(argv)
 
-    device = torch.device(
-        args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    device = select_device(args.device)
     epochs = args.epochs or _DEFAULT_EPOCHS[args.dataset]
     graph = load_planetoid(data_dir() / "planetoid", args.dataset)
     splits = {seed: split_edges(graph.adjacency, seed=seed) for seed in args.seeds}
