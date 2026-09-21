@@ -56,9 +56,7 @@ def tnbbeta_posterior(raw: Tensor, latent_dim: int) -> TNBBetaSpherical:
         and clamped at 1e-6, and epsilon = softplus(raw) > 0.
     """
     raw_direction, raw_p, raw_q, raw_epsilon = raw.split([latent_dim, 1, 1, 1], dim=-1)
-    mean_direction = raw_direction / raw_direction.norm(dim=-1, keepdim=True).clamp_min(
-        _PARAM_EPS
-    )
+    mean_direction = _unit_direction(raw_direction)
     p = raw_p.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     q = raw_q.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
@@ -75,7 +73,7 @@ def vmf_posterior(raw_mean: Tensor, raw_kappa: Tensor) -> VonMisesFisher:
     Returns:
         A batch of posteriors with unit mean and ``kappa = softplus(raw) + 1``.
     """
-    mean = raw_mean / raw_mean.norm(dim=-1, keepdim=True)
+    mean = _unit_direction(raw_mean)
     return VonMisesFisher(mean, nn.functional.softplus(raw_kappa) + 1)
 
 
@@ -174,3 +172,16 @@ def _tnbbeta_uniform_prior(
 ) -> FixedTNBBetaSphericalPrior:
     prior = FixedTNBBetaSphericalPrior(latent_dim, *uniform_prior_params(latent_dim))
     return prior.to(device)
+
+
+def _unit_direction(raw: Tensor) -> Tensor:
+    """Normalizes ``raw`` rows to unit length, using e_1 for (near-)zero rows.
+
+    A row can be exactly zero, e.g. a graph node with no features and no neighbours
+    gets a zero GCN output. Dividing by its norm would give NaN (or a non-unit vector
+    if the norm is clamped), so such rows fall back to the fixed pole e_1.
+    """
+    norm = raw.norm(dim=-1, keepdim=True)
+    pole = torch.zeros_like(raw)
+    pole[..., 0] = 1.0
+    return torch.where(norm > _PARAM_EPS, raw / norm.clamp_min(_PARAM_EPS), pole)

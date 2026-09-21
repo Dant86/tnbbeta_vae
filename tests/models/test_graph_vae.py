@@ -165,3 +165,88 @@ def test_driver_grid_search_selects_by_validation_auc_and_writes_results(
     assert "TNBBeta-VGAE" in rows[0]
     assert rows[2].startswith("| cora | AUC | ")
     assert "±" in rows[2] and "| - | - | - |" in rows[4]
+
+
+@pytest.mark.parametrize("family", _FAMILIES)
+def test_a_featureless_isolated_node_does_not_break_training(family: Any) -> None:
+    """Citeseer has such nodes: the GCN gives them an exactly zero raw output."""
+    torch.manual_seed(0)
+    graph = _community_graph()
+    size = graph.adjacency.shape[0]
+    padded = sp.block_diag([graph.adjacency, sp.csr_matrix((1, 1))], format="csr")
+    features = sp.vstack([graph.features, sp.csr_matrix((1, 6))], format="csr")
+    batch, _ = _batch(Graph(padded, features))
+    model = GraphVAE(GraphVAEConfig(family=family, in_features=6, latent_dim=4))
+
+    out = model.training_step(batch)
+    out["loss"].backward()
+    embeddings = model.embeddings(batch)
+
+    assert torch.isfinite(out["loss"])
+    assert embeddings.shape == (size + 1, 4)
+    assert torch.isfinite(embeddings).all()
+    if family != "gaussian":
+        assert torch.allclose(embeddings.norm(dim=-1), torch.ones(size + 1), atol=1e-4)
+
+
+def test_a_diverging_run_stops_and_is_reported_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _community_graph()
+    split = split_edges(graph.adjacency, seed=0)
+    real_step = GraphVAE.training_step
+    calls = {"count": 0}
+
+    def unstable_step(self: GraphVAE, batch: GraphBatch, kl_weight: float = 1.0) -> Any:
+        calls["count"] += 1
+        out = real_step(self, batch, kl_weight)
+        if calls["count"] > 5:
+            out["loss"] = out["loss"] * float("nan")
+        return out
+
+    monkeypatch.setattr(GraphVAE, "training_step", unstable_step)
+
+    result = link_main.run_once(
+        graph,
+        split,
+        GraphVAEConfig(family="gaussian", in_features=6, latent_dim=4),
+        lr=0.01,
+        epochs=50,
+        seed=0,
+        device=torch.device("cpu"),
+    )
+
+    assert result["diverged"] == 1.0
+    assert calls["count"] == 6  # stopped at the first non-finite step
+    assert 0.0 <= result["best_epoch"] <= 4.0  # best of the 5 healthy epochs is kept
+    assert 0.0 <= result["val_auc"] <= 1.0
+
+
+def test_a_run_that_diverges_immediately_reports_chance_level_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = _community_graph()
+    split = split_edges(graph.adjacency, seed=0)
+    real_step = GraphVAE.training_step
+
+    def always_nan(self: GraphVAE, batch: GraphBatch, kl_weight: float = 1.0) -> Any:
+        out = real_step(self, batch, kl_weight)
+        out["loss"] = out["loss"] * float("nan")
+        return out
+
+    monkeypatch.setattr(GraphVAE, "training_step", always_nan)
+
+    result = link_main.run_once(
+        graph,
+        split,
+        GraphVAEConfig(family="vmf", in_features=6, latent_dim=4),
+        lr=0.01,
+        epochs=10,
+        seed=0,
+        device=torch.device("cpu"),
+    )
+
+    assert result["diverged"] == 1.0 and result["best_epoch"] == -1.0
+    assert result["val_auc"] == result["test_auc"] == 0.5
+    summary = link_main.summarize([result, {**result, "diverged": 0.0}])
+    assert summary["num_diverged"] == 1.0
