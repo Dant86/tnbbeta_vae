@@ -134,7 +134,9 @@ def run_once(
         device: Device to train on.
 
     Returns:
-        ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``.
+        ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``, plus
+        ``diverged`` (1.0 if a non-finite loss or gradient stopped training early; the
+        metrics are then those of the best epoch before it, or chance level if none).
     """
     torch.manual_seed(seed)
     upper = np.stack(np.nonzero(np.triu(split.train_adjacency.toarray(), k=1)))
@@ -146,11 +148,24 @@ def run_once(
     model = GraphVAE(config).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    best: dict[str, float] = {"val_auc": -1.0}
+    best: dict[str, float] = {
+        "val_auc": 0.5,
+        "val_ap": 0.5,
+        "test_auc": 0.5,
+        "test_ap": 0.5,
+        "best_epoch": -1.0,
+    }
+    best_val_auc = -1.0
+    diverged = 0.0
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
-        model.training_step(batch)["loss"].backward()
+        loss = model.training_step(batch)["loss"]
+        loss.backward()
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))
+        if not (torch.isfinite(loss) and torch.isfinite(grad_norm)):
+            diverged = 1.0
+            break
         optimizer.step()
 
         model.eval()
@@ -158,7 +173,8 @@ def run_once(
         val_auc, val_ap = score_edges(
             embeddings, split.val_positive, split.val_negative
         )
-        if val_auc > best["val_auc"]:
+        if val_auc > best_val_auc:
+            best_val_auc = val_auc
             test_auc, test_ap = score_edges(
                 embeddings, split.test_positive, split.test_negative
             )
@@ -169,7 +185,7 @@ def run_once(
                 "test_ap": test_ap,
                 "best_epoch": float(epoch),
             }
-    return best
+    return {**best, "diverged": diverged}
 
 
 def score_edges(
@@ -194,7 +210,8 @@ def score_edges(
 
 
 def summarize(runs: list[dict[str, float]]) -> dict[str, float]:
-    """Means over seeds of every metric, and the test metrics' deviations."""
+    """Means over seeds of every metric, the test metrics' deviations and the number of
+    runs that diverged."""
     summary = {
         key: float(np.mean([run[key] for run in runs]))
         for key in ("val_auc", "val_ap", "test_auc", "test_ap")
@@ -204,6 +221,7 @@ def summarize(runs: list[dict[str, float]]) -> dict[str, float]:
         summary[f"{key}_std"] = (
             float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
         )
+    summary["num_diverged"] = float(sum(run.get("diverged", 0.0) for run in runs))
     return summary
 
 
