@@ -44,16 +44,17 @@ def _run(
 
 
 @pytest.mark.parametrize(
-    ("task", "run_name", "z1_family", "z2_family", "z1_dim", "z2_dim", "seed"),
+    ("task", "run_name", "z1_family", "z2_family", "z1_ambient", "z2_ambient", "seed"),
     [
+        # Gaussian latents use d; sphere latents (S^d in R^(d+1)) get ambient d + 1.
         (0, "semi_nn_z5_5_seed0", "gaussian", "gaussian", "5", "5", "0"),
         (4, "semi_nn_z5_5_seed4", "gaussian", "gaussian", "5", "5", "4"),
         (5, "semi_nn_z5_10_seed0", "gaussian", "gaussian", "5", "10", "0"),
         (44, "semi_nn_z50_50_seed4", "gaussian", "gaussian", "50", "50", "4"),
-        (45, "semi_ss_z5_5_seed0", "vmf", "vmf", "5", "5", "0"),
-        (90, "semi_sn_z5_5_seed0", "vmf", "gaussian", "5", "5", "0"),
-        (135, "semi_tt_z5_5_seed0", "tnbbeta", "tnbbeta", "5", "5", "0"),
-        (224, "semi_tn_z50_50_seed4", "tnbbeta", "gaussian", "50", "50", "4"),
+        (45, "semi_ss_z5_5_seed0", "vmf", "vmf", "6", "6", "0"),
+        (90, "semi_sn_z5_5_seed0", "vmf", "gaussian", "6", "5", "0"),
+        (135, "semi_tt_z5_5_seed0", "tnbbeta", "tnbbeta", "6", "6", "0"),
+        (224, "semi_tn_z50_50_seed4", "tnbbeta", "gaussian", "51", "50", "4"),
     ],
 )
 def test_array_index_maps_to_variant_dims_and_seed(
@@ -62,8 +63,8 @@ def test_array_index_maps_to_variant_dims_and_seed(
     run_name: str,
     z1_family: str,
     z2_family: str,
-    z1_dim: str,
-    z2_dim: str,
+    z1_ambient: str,
+    z2_ambient: str,
     seed: str,
 ) -> None:
     result, uv_calls, _ = _run(tmp_path, task)
@@ -72,7 +73,8 @@ def test_array_index_maps_to_variant_dims_and_seed(
     (call,) = uv_calls
     assert f"--run-name {run_name} --resume" in call
     assert f"--z1-family {z1_family} --z2-family {z2_family}" in call
-    assert f"--z1-dim {z1_dim} --z2-dim {z2_dim}" in call
+    assert f"--z1-dim {z1_ambient} --z2-dim {z2_ambient}" in call
+    assert "--kappa-init dimension" in call
     assert f"--seed {seed}" in call
 
 

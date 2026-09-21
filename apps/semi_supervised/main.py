@@ -48,6 +48,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--z2-dim", type=int, default=10)
     parser.add_argument("--num-labels", type=int, default=100)
     parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument(
+        "--kappa-init",
+        choices=["reference", "dimension"],
+        default="reference",
+        help="Start vMF kappa at ~1.7 (reference) or at the latent dimension.",
+    )
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--epochs", type=int, default=1000)
     parser.add_argument("--patience", type=int, default=50)
@@ -72,6 +78,7 @@ def main(argv: list[str] | None = None) -> None:
         z2_dim=args.z2_dim,
         alpha=args.alpha,
         num_examples=len(train_set),
+        kappa_init=args.kappa_init,
     )
     model = M1M2VAE(config).to(device)
     trainer = Trainer(
@@ -111,6 +118,7 @@ def main(argv: list[str] | None = None) -> None:
         "z2_dim": args.z2_dim,
         "num_labels": args.num_labels,
         "alpha": args.alpha,
+        "kappa_init": args.kappa_init,
         "seed": args.seed,
         "epochs_completed": checkpoint["epochs_completed"],
         "test_accuracy": accuracy,

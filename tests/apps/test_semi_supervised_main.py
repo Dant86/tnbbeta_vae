@@ -41,13 +41,16 @@ def _args(*extra: str) -> list[str]:
 def test_trains_writes_accuracy_and_keeps_the_best_epoch(
     z1: str, z2: str, tmp_path: Path
 ) -> None:
-    semi_main.main(_args("--z1-family", z1, "--z2-family", z2))
+    semi_main.main(
+        _args("--z1-family", z1, "--z2-family", z2, "--kappa-init", "dimension")
+    )
 
     checkpoints = tmp_path / "ckpt" / "semi"
     result = json.loads((checkpoints / "semi_supervised_final.json").read_text())
     assert result["z1_family"] == z1 and result["z2_family"] == z2
     assert 0.0 <= result["test_accuracy"] <= 1.0
     assert result["num_labels"] == 10
+    assert result["kappa_init"] == "dimension"
     assert (checkpoints / "best.pt").exists() and (checkpoints / "final.pt").exists()
     final = torch.load(checkpoints / "final.pt")
     assert final["config"]["num_examples"] == 40
