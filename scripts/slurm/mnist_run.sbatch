@@ -1,7 +1,8 @@
 #!/bin/bash
 # Trains ONE model on MNIST with the S-VAE paper's protocol (batch 64, 100-epoch KL warm-up,
-# early stopping with patience 50 on the validation set), then writes its Table 1 metrics and
-# k-NN accuracy. Same as one task of mnist_sweep.sbatch, for ad hoc runs. From the repo root:
+# early stopping with patience 50 on the validation set), then writes its Table 1 metrics,
+# k-NN accuracy, confidence-only probe, and (TNBBeta only) the p/q latitude diagnostic. Same
+# as one task of mnist_sweep.sbatch, for ad hoc runs. From the repo root:
 #   sbatch scripts/slurm/mnist_run.sbatch <model> <run-name> [extra apps.train.main args...]
 # e.g. a vMF run that starts at kappa = 40 instead of the reference kappa of about 1.7:
 #   sbatch --exclude=k002,k003 scripts/slurm/mnist_run.sbatch conv_vmf_vae mnist_vmfk_d40_seed0 \
@@ -46,4 +47,8 @@ fi
 uv run --no-sync python -m apps.eval.svae_metrics --run-name "${RUN_NAME}" \
     --num-workers "${SLURM_CPUS_PER_TASK:-4}"
 uv run --no-sync python -m apps.eval.svae_knn --run-name "${RUN_NAME}" \
+    --num-workers "${SLURM_CPUS_PER_TASK:-4}"
+uv run --no-sync python -m apps.eval.confidence_probe --run-name "${RUN_NAME}" \
+    --num-workers "${SLURM_CPUS_PER_TASK:-4}"
+uv run --no-sync python -m apps.eval.svae_latitude --run-name "${RUN_NAME}" \
     --num-workers "${SLURM_CPUS_PER_TASK:-4}"
