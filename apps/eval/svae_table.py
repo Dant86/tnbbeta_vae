@@ -1,17 +1,20 @@
 """Aggregates per-run S-VAE metrics into a Table-1-style markdown table.
 
 Usage:
-    uv run python -m apps.eval.svae_table [--kind table1|knn] [--prefix mnist] \
-        [--models gauss vmf tnb] [--dims 2 5 10 20 40] [--seeds 0 1 2 3 4]
+    uv run python -m apps.eval.svae_table [--kind table1|knn|confidence] \
+        [--prefix mnist] [--models gauss vmf tnb] [--dims 2 5 10 20 40] \
+        [--seeds 0 1 2 3 4]
 
 Reads, from ``$TNBBETA_CHECKPOINT_DIR/<prefix>_<model>_d<dim>_seed<seed>/`` (the
-names used by ``scripts/slurm/mnist_sweep.sbatch``), either
+names used by ``scripts/slurm/mnist_sweep.sbatch``), one of:
 ``svae_metrics_final_<split>.json`` (``--kind table1``, ``apps.eval.svae_metrics``:
-LL, L[q] = the ELBO, RE, KL) or ``svae_knn_final.json`` (``--kind knn``,
-``apps.eval.svae_knn``: k-NN accuracy for 100/600/1000 labels), and prints mean +-
-standard deviation over seeds. A mean is bold if it is the best for that metric
-(higher is better; KL is never bolded) and beats every other model with a Welch
-t-test at p < ``--alpha``.
+LL, L[q] = the ELBO, RE, KL), ``svae_knn_final.json`` (``--kind knn``,
+``apps.eval.svae_knn``: k-NN accuracy for 100/600/1000 labels, direction only), or
+``confidence_probe_final.json`` (``--kind confidence``, ``apps.eval.confidence_probe``:
+the same k-NN accuracy using only the posterior's confidence scalar -- p, kappa or mean
+std -- with no directional information). Prints mean +- standard deviation over seeds.
+A mean is bold if it is the best for that metric (higher is better; KL is never bolded)
+and beats every other model with a Welch t-test at p < ``--alpha``.
 """
 
 from __future__ import annotations
@@ -49,7 +52,9 @@ def main(argv: list[str] | None = None) -> None:
         argv: Argument list, defaulting to ``sys.argv[1:]``.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--kind", choices=["table1", "knn"], default="table1")
+    parser.add_argument(
+        "--kind", choices=["table1", "knn", "confidence"], default="table1"
+    )
     parser.add_argument("--prefix", default="mnist")
     parser.add_argument("--models", nargs="+", default=["gauss", "vmf", "tnb"])
     parser.add_argument("--dims", nargs="+", type=int, default=[2, 5, 10, 20, 40])
@@ -58,12 +63,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--alpha", type=float, default=0.01)
     args = parser.parse_args(argv)
 
-    metrics = _KNN_METRICS if args.kind == "knn" else _TABLE1_METRICS
-    filename = (
-        "svae_knn_final.json"
-        if args.kind == "knn"
-        else f"svae_metrics_final_{args.split}.json"
-    )
+    metrics = _KNN_METRICS if args.kind in ("knn", "confidence") else _TABLE1_METRICS
+    filenames = {
+        "knn": "svae_knn_final.json",
+        "confidence": "confidence_probe_final.json",
+        "table1": f"svae_metrics_final_{args.split}.json",
+    }
+    filename = filenames[args.kind]
     results, missing = collect(
         args.prefix, args.models, args.dims, args.seeds, filename, metrics
     )

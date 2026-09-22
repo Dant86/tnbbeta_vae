@@ -61,10 +61,12 @@ def test_success_runs_training_metrics_and_knn_without_resubmitting(
     result, uv_calls, sbatch_calls = _run(tmp_path, train_status=0)
 
     assert result.returncode == 0
-    assert len(uv_calls) == 3
+    assert len(uv_calls) == 5
     assert (
         "apps.eval.svae_metrics" in uv_calls[1] and "apps.eval.svae_knn" in uv_calls[2]
     )
+    assert "apps.eval.confidence_probe" in uv_calls[3]
+    assert "apps.eval.svae_latitude" in uv_calls[4]
     assert sbatch_calls == []
 
 
