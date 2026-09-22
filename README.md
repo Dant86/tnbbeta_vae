@@ -102,6 +102,9 @@ sbatch scripts/slurm/mnist_sweep.sbatch              # 90-task array; edit the g
 uv run python -m apps.eval.svae_table                # Table 1: mean +- std over seeds
 uv run python -m apps.eval.svae_knn --run-name mnist_tnb_d10_seed0   # Table 2: latent k-NN
 uv run python -m apps.eval.svae_table --kind knn     # Table 2 aggregated over seeds
+uv run python -m apps.eval.confidence_probe --run-name mnist_tnb_d10_seed0  # k-NN from p/kappa alone
+uv run python -m apps.eval.svae_table --kind confidence  # aggregated over seeds
+uv run python -m apps.eval.svae_latitude --run-name mnist_tnb_d10_seed0    # TNBBeta only: p vs q plot
 ```
 
 Two more experiments from the paper:
@@ -127,6 +130,14 @@ uv run python -m apps.semi_supervised.table          # test accuracy (%), mean +
 MNIST is binarized dynamically for training and once (fixed seed) for validation and test.
 `apps.eval.svae_metrics` reports the importance-weighted log-likelihood (500 samples), the
 ELBO, the reconstruction term and the KL, in nats per image.
+
+`apps.eval.confidence_probe` runs the same k-NN class probe as `svae_knn`, but using only
+the posterior's confidence scalar (the Gaussian's mean std, vMF's kappa, or TNBBeta's p) --
+no direction -- to test whether a family routes class information through it separately
+from the mean direction. `apps.eval.svae_latitude` (TNBBeta only; a no-op for other models)
+writes a per-class p-vs-q scatter and summary stats, the "cap vs ring" diagnostic: p near 0
+or 1 is a tight cap at the mean direction like a vMF posterior, p away from the poles is a
+ring at some angular distance from it, a shape vMF cannot represent.
 
 ### Running on the UChicago DSI cluster
 
