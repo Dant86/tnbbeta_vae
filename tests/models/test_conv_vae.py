@@ -198,3 +198,57 @@ def test_p_and_q_are_bounded_away_from_the_boundary() -> None:
 
     assert torch.allclose(posterior.p, torch.full((3,), 1 - 1e-6), atol=1e-7)
     assert torch.allclose(posterior.q, torch.full((3,), 1e-6), atol=1e-7)
+
+
+def _mnist_model(**overrides: object) -> ConvTNBBetaSphericalVAE:
+    config = ConvTNBBetaSphericalVAEConfig(
+        image_channels=1,
+        image_size=28,
+        hidden_channels=8,
+        latent_dim=6,
+        likelihood="bernoulli",
+        **overrides,  # pyright: ignore[reportArgumentType]
+    )
+    return ConvTNBBetaSphericalVAE(config)
+
+
+def test_fixed_epsilon_shrinks_the_posterior_head_and_holds_epsilon_constant() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model(fixed_epsilon=0.5)
+    default_model = _mnist_model()
+
+    assert (
+        model.posterior_head.out_features
+        == default_model.posterior_head.out_features - 1
+    )
+    x = torch.bernoulli(torch.rand(5, 1, 28, 28))
+    posterior = model._encode(x)
+
+    assert torch.equal(posterior.epsilon, torch.full((5,), 0.5))
+    assert not posterior.epsilon.requires_grad
+
+
+def test_fixed_epsilon_trains_with_finite_gradients_everywhere() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model(fixed_epsilon=1.0)
+    x = torch.bernoulli(torch.rand(6, 1, 28, 28))
+
+    out = model.training_step(x)
+    out["loss"].backward()
+
+    assert torch.isfinite(out["loss"])
+    assert all(
+        p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters()
+    )
+    assert all(p.grad is not None for p in model.posterior_head.parameters())
+
+
+def test_default_config_keeps_epsilon_learned() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model()
+    x = torch.bernoulli(torch.rand(5, 1, 28, 28))
+
+    posterior = model._encode(x)
+
+    assert model.config.fixed_epsilon is None
+    assert len(posterior.epsilon.unique()) > 1
