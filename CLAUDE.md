@@ -68,7 +68,11 @@ automatically on commit, excluding `notebooks/`.
   confidence scalar alone -- p, kappa or mean std -- no direction) and
   `apps/eval/svae_latitude.py` (TNBBeta-only p-vs-q "cap vs ring" diagnostic; a no-op for
   other models) probe how each family's extra parameters differ geometrically, once the
-  aggregate metrics alone stop distinguishing them.
+  aggregate metrics alone stop distinguishing them. On MNIST, TNBBeta's `p` saturates near
+  1 with `q` at its floor (the `q=0` special case: a cap at the mean direction, same shape
+  vMF always has), so `p` carries almost no class signal by construction; `epsilon` (the
+  cap's thickness there) is the parameter actually analogous to vMF's kappa, and
+  `confidence_probe.py --param epsilon` probes that instead.
 - Sphere models' `latent_dim` is the AMBIENT dimension (S^(latent_dim - 1) in R^latent_dim).
   The S-VAE paper's "d" is the manifold dimension: its d=2 S-VAE is S^2 in R^3 (Figure 2 shows
   a Hammer projection of S^2, and the reference code trains the vMF model with `z_dim + 1`).
