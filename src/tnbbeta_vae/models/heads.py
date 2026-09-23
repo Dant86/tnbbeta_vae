@@ -52,35 +52,49 @@ _MAX_KAPPA = 1e6
 
 
 def tnbbeta_posterior(
-    raw: Tensor, latent_dim: int, fixed_epsilon: float | None = None
+    raw: Tensor,
+    latent_dim: int,
+    fixed_epsilon: float | None = None,
+    fixed_mean_direction: bool = False,
 ) -> TNBBetaSpherical:
     """Builds a TNBBetaSpherical posterior from raw network outputs.
 
     Args:
-        raw: Raw outputs: an unnormalized mean direction, then the raw p and q,
-            then the raw epsilon unless ``fixed_epsilon`` is set -- shape
-            ``(batch, latent_dim + 3)``, or ``(batch, latent_dim + 2)`` when
-            ``fixed_epsilon`` is set, since then there is nothing for the network
-            to predict for epsilon.
+        raw: Raw outputs, in order: an unnormalized mean direction (unless
+            ``fixed_mean_direction``), then the raw p and q, then the raw epsilon
+            (unless ``fixed_epsilon`` is set). Shape ``(batch, head_size)``, where
+            ``head_size`` is ``latent_dim + 3`` minus ``latent_dim`` if
+            ``fixed_mean_direction`` and minus ``1`` if ``fixed_epsilon`` is set,
+            since a fixed parameter is nothing for the network to predict.
         latent_dim: Ambient dimension of the sphere.
         fixed_epsilon: If set, every posterior in the batch gets this constant
             epsilon instead of one predicted from ``raw`` -- an ablation testing
             whether removing epsilon's freedom pushes p and/or q to pick up
             whatever work epsilon was doing (see ``ConvTNBBetaSphericalVAEConfig``).
+        fixed_mean_direction: If set, every posterior in the batch gets the fixed
+            pole ``e_1`` as its mean direction instead of one predicted from
+            ``raw`` -- an ablation testing whether p/q/epsilon become informative
+            once direction, the channel that otherwise carries essentially all
+            per-example signal, is no longer available to carry it instead.
 
     Returns:
-        A batch of posteriors: unit mean direction, p and q squashed to (0, 1)
-        and clamped at 1e-6, and epsilon = softplus(raw) > 0 (or the fixed value).
+        A batch of posteriors: unit mean direction (or the fixed pole), p and q
+        squashed to (0, 1) and clamped at 1e-6, and epsilon = softplus(raw) > 0
+        (or the fixed value).
     """
+    direction_size = 0 if fixed_mean_direction else latent_dim
+    epsilon_size = 0 if fixed_epsilon is not None else 1
+    raw_direction, raw_p, raw_q, raw_epsilon = raw.split(
+        [direction_size, 1, 1, epsilon_size], dim=-1
+    )
+    if fixed_mean_direction:
+        mean_direction = _fixed_pole(latent_dim, raw_p.shape[:-1], raw.device)
+    else:
+        mean_direction = _unit_direction(raw_direction)
     if fixed_epsilon is None:
-        raw_direction, raw_p, raw_q, raw_epsilon = raw.split(
-            [latent_dim, 1, 1, 1], dim=-1
-        )
         epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
     else:
-        raw_direction, raw_p, raw_q = raw.split([latent_dim, 1, 1], dim=-1)
         epsilon = torch.full_like(raw_p.squeeze(-1), fixed_epsilon)
-    mean_direction = _unit_direction(raw_direction)
     p = raw_p.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     q = raw_q.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     return TNBBetaSpherical(mean_direction, p, q, epsilon)
@@ -214,6 +228,15 @@ def _tnbbeta_uniform_prior(
 ) -> FixedTNBBetaSphericalPrior:
     prior = FixedTNBBetaSphericalPrior(latent_dim, *uniform_prior_params(latent_dim))
     return prior.to(device)
+
+
+def _fixed_pole(
+    latent_dim: int, batch_shape: torch.Size, device: torch.device
+) -> Tensor:
+    """Returns the fixed pole ``e_1``, broadcast to ``(*batch_shape, latent_dim)``."""
+    pole = torch.zeros(*batch_shape, latent_dim, device=device)
+    pole[..., 0] = 1.0
+    return pole
 
 
 def _unit_direction(raw: Tensor) -> Tensor:

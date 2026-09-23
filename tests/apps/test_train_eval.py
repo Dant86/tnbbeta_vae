@@ -255,6 +255,50 @@ def test_train_mnist_tnbbeta_with_fixed_epsilon(
     assert torch.equal(posterior.epsilon, torch.full((3,), 0.5))
 
 
+def test_train_mnist_tnbbeta_with_fixed_mean_direction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(train_main, "load_mnist", _fake_mnist)
+
+    train_main.main(
+        [
+            "--model",
+            "conv_tnbbeta_spherical_vae",
+            "--dataset",
+            "mnist",
+            "--set",
+            "latent_dim=4",
+            "--set",
+            "hidden_channels=8",
+            "--set",
+            "fixed_mean_direction=true",
+            "--epochs",
+            "2",
+            "--batch-size",
+            "8",
+            "--num-workers",
+            "0",
+            "--device",
+            "cpu",
+            "--run-name",
+            "mnist_fixed_mu",
+            "--patience",
+            "5",
+            "--kl-warmup-epochs",
+            "1",
+        ]  # fmt: skip
+    )
+
+    checkpoints = tmp_path / "ckpt" / "mnist_fixed_mu"
+    loaded, checkpoint = load_model_checkpoint(checkpoints / "final.pt", "cpu")
+    model: Any = loaded
+    assert checkpoint["config"]["fixed_mean_direction"] is True
+    posterior = model._encode(torch.rand(3, 1, 28, 28))
+    pole = torch.zeros(4)
+    pole[0] = 1.0
+    assert torch.equal(posterior.mean_direction, pole.expand(3, -1))
+
+
 def test_patience_requires_a_validation_set() -> None:
     with pytest.raises(SystemExit):
         train_main.main(
