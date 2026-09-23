@@ -252,3 +252,63 @@ def test_default_config_keeps_epsilon_learned() -> None:
 
     assert model.config.fixed_epsilon is None
     assert len(posterior.epsilon.unique()) > 1
+
+
+def test_fixed_mean_direction_shrinks_the_head_and_holds_direction_constant() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model(fixed_mean_direction=True)
+    default_model = _mnist_model()
+
+    assert (
+        model.posterior_head.out_features
+        == default_model.posterior_head.out_features - model.config.latent_dim
+    )
+    x = torch.bernoulli(torch.rand(5, 1, 28, 28))
+    posterior = model._encode(x)
+
+    pole = torch.zeros(model.config.latent_dim)
+    pole[0] = 1.0
+    assert torch.equal(posterior.mean_direction, pole.expand(5, -1))
+    assert not posterior.mean_direction.requires_grad
+    # p, q and epsilon are still predicted per example -- only direction is fixed.
+    assert len(posterior.p.unique()) > 1
+
+
+def test_fixed_mean_direction_trains_with_finite_gradients_everywhere() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model(fixed_mean_direction=True)
+    x = torch.bernoulli(torch.rand(6, 1, 28, 28))
+
+    out = model.training_step(x)
+    out["loss"].backward()
+
+    assert torch.isfinite(out["loss"])
+    assert all(
+        p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters()
+    )
+    assert all(p.grad is not None for p in model.posterior_head.parameters())
+
+
+def test_default_config_keeps_mean_direction_learned() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model()
+    x = torch.bernoulli(torch.rand(5, 1, 28, 28))
+
+    posterior = model._encode(x)
+
+    assert model.config.fixed_mean_direction is False
+    assert posterior.mean_direction.unique(dim=0).shape[0] > 1
+
+
+def test_fixed_epsilon_and_fixed_mean_direction_compose() -> None:
+    torch.manual_seed(0)
+    model = _mnist_model(fixed_epsilon=1.0, fixed_mean_direction=True)
+    x = torch.bernoulli(torch.rand(5, 1, 28, 28))
+
+    posterior = model._encode(x)
+
+    assert model.posterior_head.out_features == 2  # just p and q
+    assert torch.equal(posterior.epsilon, torch.full((5,), 1.0))
+    pole = torch.zeros(model.config.latent_dim)
+    pole[0] = 1.0
+    assert torch.equal(posterior.mean_direction, pole.expand(5, -1))

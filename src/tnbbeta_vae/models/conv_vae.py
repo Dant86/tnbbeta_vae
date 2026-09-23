@@ -62,6 +62,18 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
             "how concentrated" -- fixing epsilon tests whether p and/or q
             pick up that role once epsilon cannot. ``None`` (default) keeps
             epsilon learned, unchanged from before this option existed.
+        fixed_mean_direction: If set, every posterior's mean direction is the
+            fixed pole ``e_1`` instead of one predicted by the encoder (which
+            removes ``latent_dim`` degrees of freedom from the
+            posterior_head's output). An ablation: direction alone appears to
+            carry essentially all of the per-example signal TNBBeta's
+            posterior needs to convey (see the fixed-epsilon ablation and the
+            latitude/confidence-probe results); fixing it removes that escape
+            hatch so any per-example information has to route entirely
+            through p/q/epsilon instead, testing whether that extra
+            expressivity is usable when it's the only channel available.
+            ``False`` (default) keeps direction learned, unchanged from
+            before this option existed.
     """
 
     image_channels: int = 3
@@ -72,6 +84,7 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
     fixed_epsilon: float | None = None
+    fixed_mean_direction: bool = False
 
 
 @register_model("conv_tnbbeta_spherical_vae", config_cls=ConvTNBBetaSphericalVAEConfig)
@@ -90,7 +103,9 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         self.encoder = ConvEncoder(
             config.image_channels, config.image_size, config.hidden_channels
         )
-        head_size = config.latent_dim + (2 if config.fixed_epsilon is not None else 3)
+        head_size = (0 if config.fixed_mean_direction else config.latent_dim) + (
+            2 if config.fixed_epsilon is not None else 3
+        )
         self.posterior_head = nn.Linear(self.encoder.out_features, head_size)
         self.decoder = ConvDecoder(
             config.latent_dim,
@@ -198,7 +213,10 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         """Maps images to a per-example TNBBetaSpherical posterior."""
         raw = self.posterior_head(self.encoder(x))
         return tnbbeta_posterior(
-            raw, self.config.latent_dim, fixed_epsilon=self.config.fixed_epsilon
+            raw,
+            self.config.latent_dim,
+            fixed_epsilon=self.config.fixed_epsilon,
+            fixed_mean_direction=self.config.fixed_mean_direction,
         )
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:
