@@ -53,6 +53,15 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
             estimate. Higher values lower variance (there's no
             closed-form KL to fall back on here) at the cost of that many
             extra decoder calls per training step.
+        fixed_epsilon: If set, epsilon is held at this constant for every
+            example instead of being predicted by the encoder (which removes
+            an entire degree of freedom from the posterior_head's output).
+            An ablation: MNIST training saturates p near 1 with q near 0 (a
+            cap at the mean direction, the same shape a von Mises-Fisher
+            posterior always has), with epsilon alone doing the work of
+            "how concentrated" -- fixing epsilon tests whether p and/or q
+            pick up that role once epsilon cannot. ``None`` (default) keeps
+            epsilon learned, unchanged from before this option existed.
     """
 
     image_channels: int = 3
@@ -62,6 +71,7 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     likelihood_scale: float = 1.0
     likelihood: Literal["gaussian", "bernoulli"] = "gaussian"
     num_elbo_samples: int = 1
+    fixed_epsilon: float | None = None
 
 
 @register_model("conv_tnbbeta_spherical_vae", config_cls=ConvTNBBetaSphericalVAEConfig)
@@ -80,9 +90,8 @@ class ConvTNBBetaSphericalVAE(nn.Module):
         self.encoder = ConvEncoder(
             config.image_channels, config.image_size, config.hidden_channels
         )
-        self.posterior_head = nn.Linear(
-            self.encoder.out_features, config.latent_dim + 3
-        )
+        head_size = config.latent_dim + (2 if config.fixed_epsilon is not None else 3)
+        self.posterior_head = nn.Linear(self.encoder.out_features, head_size)
         self.decoder = ConvDecoder(
             config.latent_dim,
             config.image_channels,
@@ -188,7 +197,9 @@ class ConvTNBBetaSphericalVAE(nn.Module):
     def _encode(self, x: Tensor) -> TNBBetaSpherical:
         """Maps images to a per-example TNBBetaSpherical posterior."""
         raw = self.posterior_head(self.encoder(x))
-        return tnbbeta_posterior(raw, self.config.latent_dim)
+        return tnbbeta_posterior(
+            raw, self.config.latent_dim, fixed_epsilon=self.config.fixed_epsilon
+        )
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:
         """Decodes to Gaussian means, or to logits for a Bernoulli likelihood."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -14,6 +15,7 @@ from apps.eval import main as eval_main
 from apps.train import main as train_main
 from tnbbeta_vae.data.cifar10 import Cifar10Images
 from tnbbeta_vae.data.mnist import MnistImages
+from tnbbeta_vae.training import load_model_checkpoint
 from tnbbeta_vae.training.device import (
     NO_GPU_EXIT_CODE,
     SLURM_GPU_VARIABLES,
@@ -209,6 +211,48 @@ def test_train_mnist_with_validation_and_kl_warmup(
     assert (checkpoints / "best.pt").exists()
     metrics = (tmp_path / "runs" / "mnist_smoke" / "metrics.jsonl").read_text()
     assert '"val_loss"' in metrics
+
+
+def test_train_mnist_tnbbeta_with_fixed_epsilon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(train_main, "load_mnist", _fake_mnist)
+
+    train_main.main(
+        [
+            "--model",
+            "conv_tnbbeta_spherical_vae",
+            "--dataset",
+            "mnist",
+            "--set",
+            "latent_dim=4",
+            "--set",
+            "hidden_channels=8",
+            "--set",
+            "fixed_epsilon=0.5",
+            "--epochs",
+            "2",
+            "--batch-size",
+            "8",
+            "--num-workers",
+            "0",
+            "--device",
+            "cpu",
+            "--run-name",
+            "mnist_fixed_eps",
+            "--patience",
+            "5",
+            "--kl-warmup-epochs",
+            "1",
+        ]  # fmt: skip
+    )
+
+    checkpoints = tmp_path / "ckpt" / "mnist_fixed_eps"
+    loaded, checkpoint = load_model_checkpoint(checkpoints / "final.pt", "cpu")
+    model: Any = loaded
+    assert checkpoint["config"]["fixed_epsilon"] == 0.5
+    posterior = model._encode(torch.zeros(3, 1, 28, 28))
+    assert torch.equal(posterior.epsilon, torch.full((3,), 0.5))
 
 
 def test_patience_requires_a_validation_set() -> None:

@@ -51,23 +51,38 @@ _LOG_VAR_BOUND = 10.0
 _MAX_KAPPA = 1e6
 
 
-def tnbbeta_posterior(raw: Tensor, latent_dim: int) -> TNBBetaSpherical:
-    """Builds a TNBBetaSpherical posterior from ``latent_dim + 3`` raw outputs.
+def tnbbeta_posterior(
+    raw: Tensor, latent_dim: int, fixed_epsilon: float | None = None
+) -> TNBBetaSpherical:
+    """Builds a TNBBetaSpherical posterior from raw network outputs.
 
     Args:
-        raw: Raw outputs, shape ``(batch, latent_dim + 3)``: an unnormalized mean
-            direction, then the raw p, q and epsilon.
+        raw: Raw outputs: an unnormalized mean direction, then the raw p and q,
+            then the raw epsilon unless ``fixed_epsilon`` is set -- shape
+            ``(batch, latent_dim + 3)``, or ``(batch, latent_dim + 2)`` when
+            ``fixed_epsilon`` is set, since then there is nothing for the network
+            to predict for epsilon.
         latent_dim: Ambient dimension of the sphere.
+        fixed_epsilon: If set, every posterior in the batch gets this constant
+            epsilon instead of one predicted from ``raw`` -- an ablation testing
+            whether removing epsilon's freedom pushes p and/or q to pick up
+            whatever work epsilon was doing (see ``ConvTNBBetaSphericalVAEConfig``).
 
     Returns:
         A batch of posteriors: unit mean direction, p and q squashed to (0, 1)
-        and clamped at 1e-6, and epsilon = softplus(raw) > 0.
+        and clamped at 1e-6, and epsilon = softplus(raw) > 0 (or the fixed value).
     """
-    raw_direction, raw_p, raw_q, raw_epsilon = raw.split([latent_dim, 1, 1, 1], dim=-1)
+    if fixed_epsilon is None:
+        raw_direction, raw_p, raw_q, raw_epsilon = raw.split(
+            [latent_dim, 1, 1, 1], dim=-1
+        )
+        epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
+    else:
+        raw_direction, raw_p, raw_q = raw.split([latent_dim, 1, 1], dim=-1)
+        epsilon = torch.full_like(raw_p.squeeze(-1), fixed_epsilon)
     mean_direction = _unit_direction(raw_direction)
     p = raw_p.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     q = raw_q.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
-    epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
     return TNBBetaSpherical(mean_direction, p, q, epsilon)
 
 

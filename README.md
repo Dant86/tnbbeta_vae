@@ -109,6 +109,13 @@ uv run python -m apps.eval.svae_table --kind confidence_epsilon  # aggregated, T
 uv run python -m apps.eval.svae_latitude --run-name mnist_tnb_d10_seed0    # TNBBeta only: p vs q plot
 ```
 
+Ablation: does fixing TNBBeta's epsilon force p and/or q to pick up its role (see above)?
+
+```bash
+sbatch scripts/slurm/fixed_epsilon_sweep.sbatch      # 9 tasks: epsilon in {0.5, 1, 1.5} x 3 seeds, d=5
+uv run python -m apps.eval.svae_table --prefix mnistfix --models eps0p5 eps1p0 eps1p5 --dims 5 --seeds 0 1 2
+```
+
 Two more experiments from the paper:
 
 ```bash

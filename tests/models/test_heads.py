@@ -53,3 +53,27 @@ def test_regular_rows_are_unchanged_by_the_fallback(scale: float) -> None:
     assert torch.allclose(
         loc, raw_mean / raw_mean.norm(dim=-1, keepdim=True), atol=1e-6
     )
+
+
+def test_tnbbeta_head_fixed_epsilon_uses_two_fewer_raw_columns() -> None:
+    dim = 6
+    raw = torch.cat([_raw_with_zero_rows(dim), torch.randn(5, 2)], dim=-1)
+
+    posterior = tnbbeta_posterior(raw.detach(), dim, fixed_epsilon=0.75)
+
+    assert torch.equal(posterior.epsilon, torch.full((5,), 0.75))
+    assert torch.allclose(
+        posterior.mean_direction.norm(dim=-1), torch.ones(5), atol=1e-6
+    )
+    assert torch.isfinite(posterior.rsample()).all()
+
+
+def test_tnbbeta_head_default_epsilon_is_unaffected_by_the_fixed_epsilon_arg() -> None:
+    dim = 6
+    raw = torch.cat([_raw_with_zero_rows(dim), torch.randn(5, 3)], dim=-1)
+
+    default = tnbbeta_posterior(raw.detach(), dim)
+    explicit_none = tnbbeta_posterior(raw.detach(), dim, fixed_epsilon=None)
+
+    assert torch.equal(default.epsilon, explicit_none.epsilon)
+    assert len(default.epsilon.unique()) > 1
