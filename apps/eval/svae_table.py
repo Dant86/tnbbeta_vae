@@ -12,7 +12,10 @@ LL, L[q] = the ELBO, RE, KL), ``svae_knn_final.json`` (``--kind knn``,
 ``apps.eval.svae_knn``: k-NN accuracy for 100/600/1000 labels, direction only), or
 ``confidence_probe_final.json`` (``--kind confidence``, ``apps.eval.confidence_probe``:
 the same k-NN accuracy using only the posterior's confidence scalar -- p, kappa or mean
-std -- with no directional information). Prints mean +- standard deviation over seeds.
+std -- with no directional information), or ``confidence_probe_epsilon_final.json``
+(``--kind confidence_epsilon``: TNBBeta only, its epsilon in place of p -- the fairer
+comparison to vMF's kappa once training saturates p). Prints mean +- standard deviation
+over seeds.
 A mean is bold if it is the best for that metric (higher is better; KL is never bolded)
 and beats every other model with a Welch t-test at p < ``--alpha``.
 """
@@ -53,7 +56,9 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--kind", choices=["table1", "knn", "confidence"], default="table1"
+        "--kind",
+        choices=["table1", "knn", "confidence", "confidence_epsilon"],
+        default="table1",
     )
     parser.add_argument("--prefix", default="mnist")
     parser.add_argument("--models", nargs="+", default=["gauss", "vmf", "tnb"])
@@ -63,10 +68,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--alpha", type=float, default=0.01)
     args = parser.parse_args(argv)
 
-    metrics = _KNN_METRICS if args.kind in ("knn", "confidence") else _TABLE1_METRICS
+    metrics = (
+        _KNN_METRICS
+        if args.kind in ("knn", "confidence", "confidence_epsilon")
+        else _TABLE1_METRICS
+    )
     filenames = {
         "knn": "svae_knn_final.json",
         "confidence": "confidence_probe_final.json",
+        "confidence_epsilon": "confidence_probe_epsilon_final.json",
         "table1": f"svae_metrics_final_{args.split}.json",
     }
     filename = filenames[args.kind]
