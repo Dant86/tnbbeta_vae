@@ -3,8 +3,10 @@
 # paper's protocol (batch 64, KL warm-up 100 epochs, early stopping with patience 50 on
 # the 10k validation images). Each task trains, then writes svae_metrics_final_test.json
 # (Table 1), svae_knn_final.json (Table 2), confidence_probe_final.json (k-NN accuracy from
-# the posterior's confidence scalar alone -- p, kappa or mean std -- no direction), and, for
-# TNBBeta only, latitude_final.json/.html (the p/q "cap vs ring" diagnostic).
+# the posterior's confidence scalar alone -- p, kappa or mean std -- no direction),
+# confidence_probe_epsilon_final.json (TNBBeta only: the same probe using epsilon instead of
+# p, the fairer comparison to vMF's kappa once training saturates p; a no-op elsewhere), and,
+# for TNBBeta only, latitude_final.json/.html (the p/q "cap vs ring" diagnostic).
 # Edit the grid below; keep --array's upper bound at (product of sizes) - 1.
 #   7 models x 6 latent dims x 5 seeds = 210 tasks -> 0-209
 #
@@ -97,6 +99,9 @@ uv run --no-sync python -m apps.eval.svae_knn --run-name "${RUN_NAME}" \
 
 uv run --no-sync python -m apps.eval.confidence_probe --run-name "${RUN_NAME}" \
     --num-workers "${SLURM_CPUS_PER_TASK:-4}"
+
+uv run --no-sync python -m apps.eval.confidence_probe --run-name "${RUN_NAME}" \
+    --param epsilon --num-workers "${SLURM_CPUS_PER_TASK:-4}"
 
 uv run --no-sync python -m apps.eval.svae_latitude --run-name "${RUN_NAME}" \
     --num-workers "${SLURM_CPUS_PER_TASK:-4}"

@@ -182,7 +182,9 @@ def test_sweep_script_maps_array_index_to_model_dim_seed(
     )
 
     assert result.returncode == 0, result.stderr
-    train_call, eval_call, knn_call, conf_call, lat_call = log.read_text().splitlines()
+    train_call, eval_call, knn_call, conf_call, conf_eps_call, lat_call = (
+        log.read_text().splitlines()
+    )
     assert f"--model {model} --run-name {run_name}" in train_call
     # The run name carries the paper's d; sphere models named "...s" get ambient d + 1.
     assert f"--set latent_dim={latent} " in train_call
@@ -194,6 +196,9 @@ def test_sweep_script_maps_array_index_to_model_dim_seed(
     assert f"apps.eval.svae_metrics --run-name {run_name}" in eval_call
     assert f"apps.eval.svae_knn --run-name {run_name}" in knn_call
     assert f"apps.eval.confidence_probe --run-name {run_name}" in conf_call
+    assert "--param epsilon" not in conf_call
+    assert f"apps.eval.confidence_probe --run-name {run_name}" in conf_eps_call
+    assert "--param epsilon" in conf_eps_call
     assert f"apps.eval.svae_latitude --run-name {run_name}" in lat_call
 
 
