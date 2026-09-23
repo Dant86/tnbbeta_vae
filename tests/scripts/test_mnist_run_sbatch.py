@@ -65,7 +65,7 @@ def test_trains_with_the_protocol_then_evaluates(tmp_path: Path) -> None:
     result, uv_calls, sbatch_calls = _run(tmp_path)
 
     assert result.returncode == 0, result.stderr
-    assert len(uv_calls) == 5 and sbatch_calls == []
+    assert len(uv_calls) == 6 and sbatch_calls == []
     train = uv_calls[0]
     assert (
         "--model conv_vmf_vae --run-name mnist_vmfk_d40_seed0 --resume --dataset mnist"
@@ -76,7 +76,9 @@ def test_trains_with_the_protocol_then_evaluates(tmp_path: Path) -> None:
     assert "apps.eval.svae_metrics --run-name mnist_vmfk_d40_seed0" in uv_calls[1]
     assert "apps.eval.svae_knn --run-name mnist_vmfk_d40_seed0" in uv_calls[2]
     assert "apps.eval.confidence_probe --run-name mnist_vmfk_d40_seed0" in uv_calls[3]
-    assert "apps.eval.svae_latitude --run-name mnist_vmfk_d40_seed0" in uv_calls[4]
+    assert "--param epsilon" in uv_calls[4]
+    assert "apps.eval.confidence_probe --run-name mnist_vmfk_d40_seed0" in uv_calls[4]
+    assert "apps.eval.svae_latitude --run-name mnist_vmfk_d40_seed0" in uv_calls[5]
 
 
 def test_no_gpu_resubmits_the_whole_job_with_its_arguments(tmp_path: Path) -> None:
