@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> None:
         checkpoint_dir() / f"hammer_{args.vmf_run}_vs_{args.tnb_run}.png"
     )
     figure = _figure(panels, labels, args.point_size)
-    figure.write_image(output, width=1500, height=820, scale=2)
+    figure.write_image(output, width=1500, height=490, scale=2)
     print(f"Wrote {output}")
 
 
@@ -166,7 +166,7 @@ def _figure(
                     mode="markers",
                     name=name,
                     legendgroup=name,
-                    showlegend=column == 1,
+                    showlegend=False,
                     marker={
                         "size": point_size,
                         "color": COLORS[class_index],
@@ -176,6 +176,23 @@ def _figure(
                 row=1,
                 col=column,
             )
+    # A dummy trace per class purely for the legend: a thick line swatch reads far
+    # better as a small color key than the tiny marker dots the real traces use, so
+    # the legend is drawn from these (invisible, no real lon/lat) instead.
+    for class_index, name in enumerate(CLASSES):
+        figure.add_trace(
+            go.Scattergeo(
+                lon=[None],
+                lat=[None],
+                mode="lines",
+                name=name,
+                legendgroup=name,
+                showlegend=True,
+                line={"width": 14, "color": COLORS[class_index]},
+            ),
+            row=1,
+            col=1,
+        )
     figure.update_geos(
         projection_type="hammer",
         showland=False,
@@ -196,14 +213,15 @@ def _figure(
     figure.update_layout(
         template=TEMPLATE_NAME,
         paper_bgcolor="white",
-        margin={"l": 10, "r": 10, "t": 50, "b": 60},
+        margin={"l": 10, "r": 10, "t": 35, "b": 45},
         legend={
             "title_text": "class",
             "orientation": "h",
             "x": 0.5,
             "xanchor": "center",
-            "y": -0.08,
+            "y": -0.02,
             "yanchor": "top",
+            "itemwidth": 40,
         },
     )
     return figure
