@@ -31,6 +31,7 @@ from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.mnist import load_mnist
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
+from tnbbeta_vae.plotting import TEMPLATE_NAME
 from tnbbeta_vae.training import load_model_checkpoint
 
 CLASSES = [
@@ -149,6 +150,7 @@ def _scatter_figure(
             )
         )
     figure.update_layout(
+        template=TEMPLATE_NAME,
         title=f"{title}: p (latitude) vs q (concentration), by class",
         xaxis={"title": "p", "range": [0, 1]},
         yaxis={"title": "q", "range": [0, 1]},

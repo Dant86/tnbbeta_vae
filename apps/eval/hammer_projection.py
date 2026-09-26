@@ -18,7 +18,8 @@ split across antipodal poles by that gauge freedom (see :func:`posterior_centre`
 
 Uses plotly's ``Scattergeo`` with a ``"hammer"`` geo projection (this project's other
 plots -- ``apps.eval.svae_latitude``, ``notebooks/plot_sphere_3d.py`` -- are plotly
-too), rendered to a static PNG via ``kaleido``.
+too), rendered to a static PNG via ``kaleido``, styled with the shared
+``tnbbeta_vae.plotting`` theme matching the paper's LaTeX template.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ from torch.utils.data import DataLoader
 from tnbbeta_vae.data.mnist import load_mnist
 from tnbbeta_vae.models.heads import LatentFamily, posterior_centre
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
+from tnbbeta_vae.plotting import TEMPLATE_NAME
 from tnbbeta_vae.training import load_model_checkpoint
 
 _FAMILY_BY_MODEL: dict[str, LatentFamily] = {
@@ -88,7 +90,7 @@ def main(argv: list[str] | None = None) -> None:
         checkpoint_dir() / f"hammer_{args.vmf_run}_vs_{args.tnb_run}.png"
     )
     figure = _figure(panels, labels, args.point_size)
-    figure.write_image(output, width=1600, height=760, scale=2)
+    figure.write_image(output, width=1500, height=820, scale=2)
     print(f"Wrote {output}")
 
 
@@ -152,6 +154,7 @@ def _figure(
         cols=len(panels),
         specs=[[{"type": "scattergeo"}] * len(panels)],
         subplot_titles=[title for title, _ in panels],
+        horizontal_spacing=0.02,
     )
     for column, (_, lon_lat) in enumerate(panels, start=1):
         for class_index, name in enumerate(CLASSES):
@@ -191,8 +194,17 @@ def _figure(
         bgcolor="rgba(0,0,0,0)",
     )
     figure.update_layout(
-        legend_title_text="class",
+        template=TEMPLATE_NAME,
         paper_bgcolor="white",
+        margin={"l": 10, "r": 10, "t": 50, "b": 60},
+        legend={
+            "title_text": "class",
+            "orientation": "h",
+            "x": 0.5,
+            "xanchor": "center",
+            "y": -0.08,
+            "yanchor": "top",
+        },
     )
     return figure
 
