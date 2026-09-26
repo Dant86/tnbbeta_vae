@@ -28,6 +28,8 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 
+from tnbbeta_vae.plotting import TEMPLATE_NAME
+
 CLASSES = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
 COLORS = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -111,6 +113,7 @@ def build_figure(
     by_p = [p[labels == k] for k in range(len(CLASSES)) if (labels == k).any()]
     show_scale = [i == 0 for i in range(len(class_traces))]
     fig.update_layout(
+        template=TEMPLATE_NAME,
         title=f"{title} ({len(labels)} images, {int(ambiguous.sum())} with p near 0.5)",
         scene={
             "aspectmode": "cube",
