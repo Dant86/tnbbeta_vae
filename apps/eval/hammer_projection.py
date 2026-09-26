@@ -15,6 +15,10 @@ Each posterior's centre direction is plotted (not a sample): ``VonMisesFisher.lo
 vMF, and TNBBeta's `mode_direction` -- the mean direction, negated when ``p < 0.5`` to
 undo the ``(mu, p) ~ (-mu, 1 - p)`` alias, so a single class doesn't get arbitrarily
 split across antipodal poles by that gauge freedom (see :func:`posterior_centre`).
+
+Uses plotly's ``Scattergeo`` with a ``"hammer"`` geo projection (this project's other
+plots -- ``apps.eval.svae_latitude``, ``notebooks/plot_sphere_3d.py`` -- are plotly
+too), rendered to a static PNG via ``kaleido``.
 """
 
 from __future__ import annotations
@@ -23,18 +27,16 @@ import argparse
 import sys
 from typing import Any
 
-import matplotlib
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import torch
+from torch.utils.data import DataLoader
 
-matplotlib.use("Agg")
-from matplotlib import pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import torch  # noqa: E402
-from torch.utils.data import DataLoader  # noqa: E402
-
-from tnbbeta_vae.data.mnist import load_mnist  # noqa: E402
-from tnbbeta_vae.models.heads import LatentFamily, posterior_centre  # noqa: E402
-from tnbbeta_vae.paths import checkpoint_dir, data_dir  # noqa: E402
-from tnbbeta_vae.training import load_model_checkpoint  # noqa: E402
+from tnbbeta_vae.data.mnist import load_mnist
+from tnbbeta_vae.models.heads import LatentFamily, posterior_centre
+from tnbbeta_vae.paths import checkpoint_dir, data_dir
+from tnbbeta_vae.training import load_model_checkpoint
 
 _FAMILY_BY_MODEL: dict[str, LatentFamily] = {
     "conv_vmf_vae": "vmf",
@@ -45,6 +47,13 @@ _TITLE_BY_MODEL = {
     "conv_tnbbeta_spherical_vae": "TNBBeta",
 }
 _SPHERE_DIM = 3  # S^2 in R^3.
+CLASSES = [
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+]  # fmt: skip
+COLORS = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+]  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -78,14 +87,15 @@ def main(argv: list[str] | None = None) -> None:
     output = args.output or str(
         checkpoint_dir() / f"hammer_{args.vmf_run}_vs_{args.tnb_run}.png"
     )
-    _plot(panels, labels, output, args.point_size)
+    figure = _figure(panels, labels, args.point_size)
+    figure.write_image(output, width=1600, height=760, scale=2)
     print(f"Wrote {output}")
 
 
 def _panel(
     run_name: str, args: argparse.Namespace, device: torch.device, test_set: Any
 ) -> tuple[str, np.ndarray]:
-    """Returns ``(panel title, (lon, lat) array)`` for one run's test-set centres."""
+    """Returns ``(panel title, (lon, lat) array in degrees)`` for one run's centres."""
     run_dir = checkpoint_dir() / run_name
     model, checkpoint = load_model_checkpoint(run_dir / f"{args.checkpoint}.pt", device)
     kind = checkpoint["model_name"]
@@ -123,58 +133,68 @@ def _centres(
 
 
 def _to_lon_lat(directions: np.ndarray) -> np.ndarray:
-    """Maps unit vectors in R^3 to (longitude, latitude) in radians for a Hammer axes.
+    """Maps unit vectors in R^3 to (longitude, latitude) in degrees, for Scattergeo.
 
-    ``matplotlib``'s ``"hammer"`` projection expects longitude in ``[-pi, pi]`` and
-    latitude in ``[-pi/2, pi/2]``; the third coordinate is treated as the polar axis.
+    The third coordinate is treated as the polar axis.
     """
     x, y, z = directions[:, 0], directions[:, 1], directions[:, 2]
-    longitude = np.arctan2(y, x)
-    latitude = np.arcsin(np.clip(z, -1.0, 1.0))
+    longitude = np.degrees(np.arctan2(y, x))
+    latitude = np.degrees(np.arcsin(np.clip(z, -1.0, 1.0)))
     return np.stack([longitude, latitude], axis=1)
 
 
-def _plot(
-    panels: list[tuple[str, np.ndarray]],
-    labels: np.ndarray,
-    output: str,
-    point_size: float,
-) -> None:
-    """Draws both panels' Hammer projections, one shared class legend, and saves."""
-    figure, axes = plt.subplots(
-        1,
-        len(panels),
-        figsize=(6 * len(panels), 3.6),
-        subplot_kw={"projection": "hammer"},
+def _figure(
+    panels: list[tuple[str, np.ndarray]], labels: np.ndarray, point_size: float
+) -> go.Figure:
+    """Builds the two-panel Hammer-projection figure, one shared class legend."""
+    figure = make_subplots(
+        rows=1,
+        cols=len(panels),
+        specs=[[{"type": "scattergeo"}] * len(panels)],
+        subplot_titles=[title for title, _ in panels],
     )
-    colormap = plt.get_cmap("tab10")
-    for axis, (title, lon_lat) in zip(np.atleast_1d(axes), panels, strict=True):
-        for class_index in range(10):
+    for column, (_, lon_lat) in enumerate(panels, start=1):
+        for class_index, name in enumerate(CLASSES):
             selected = labels == class_index
-            axis.scatter(
-                lon_lat[selected, 0],
-                lon_lat[selected, 1],
-                s=point_size,
-                color=colormap(class_index),
-                label=str(class_index),
-                alpha=0.6,
-                linewidths=0,
+            figure.add_trace(
+                go.Scattergeo(
+                    lon=lon_lat[selected, 0],
+                    lat=lon_lat[selected, 1],
+                    mode="markers",
+                    name=name,
+                    legendgroup=name,
+                    showlegend=column == 1,
+                    marker={
+                        "size": point_size,
+                        "color": COLORS[class_index],
+                        "opacity": 0.6,
+                    },
+                ),
+                row=1,
+                col=column,
             )
-        axis.set_title(title)
-        axis.grid(True, alpha=0.3)
-        axis.set_xticklabels([])
-        axis.set_yticklabels([])
-    axes_list = np.atleast_1d(axes)
-    axes_list[-1].legend(
-        title="class",
-        loc="upper left",
-        bbox_to_anchor=(1.02, 1.0),
-        markerscale=3,
-        fontsize="small",
+    figure.update_geos(
+        projection_type="hammer",
+        showland=False,
+        showocean=False,
+        showcountries=False,
+        showcoastlines=False,
+        showlakes=False,
+        showrivers=False,
+        showframe=True,
+        # Fixed full-sphere range: otherwise plotly fits the viewport to the data's
+        # bounding box, so a tightly-clustered panel gets zoomed in and its oval
+        # Hammer frame is cropped away -- both panels need the same fixed framing to
+        # be visually comparable regardless of how spread out each one's data is.
+        lonaxis={"showgrid": True, "gridcolor": "lightgray", "range": [-180, 180]},
+        lataxis={"showgrid": True, "gridcolor": "lightgray", "range": [-90, 90]},
+        bgcolor="rgba(0,0,0,0)",
     )
-    figure.tight_layout()
-    figure.savefig(output, dpi=200, bbox_inches="tight")
-    plt.close(figure)
+    figure.update_layout(
+        legend_title_text="class",
+        paper_bgcolor="white",
+    )
+    return figure
 
 
 if __name__ == "__main__":
