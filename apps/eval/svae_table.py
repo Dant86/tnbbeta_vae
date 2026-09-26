@@ -1,7 +1,8 @@
 """Aggregates per-run S-VAE metrics into a Table-1-style markdown table.
 
 Usage:
-    uv run python -m apps.eval.svae_table [--kind table1|knn|confidence] \
+    uv run python -m apps.eval.svae_table \
+        [--kind table1|knn|confidence|confidence_epsilon|concentration] \
         [--prefix mnist] [--models gauss vmf tnb] [--dims 2 5 10 20 40] \
         [--seeds 0 1 2 3 4]
 
@@ -14,10 +15,14 @@ LL, L[q] = the ELBO, RE, KL), ``svae_knn_final.json`` (``--kind knn``,
 the same k-NN accuracy using only the posterior's confidence scalar -- p, kappa or mean
 std -- with no directional information), or ``confidence_probe_epsilon_final.json``
 (``--kind confidence_epsilon``: TNBBeta only, its epsilon in place of p -- the fairer
-comparison to vMF's kappa once training saturates p). Prints mean +- standard deviation
-over seeds.
+comparison to vMF's kappa once training saturates p), or ``concentration_final.json``
+(``--kind concentration``, ``apps.eval.svae_concentration``: per-class ring-exclusion
+percentages and cap concentration -- see that module for what each column means).
+Prints mean +- standard deviation over seeds.
 A mean is bold if it is the best for that metric (higher is better; KL is never bolded)
-and beats every other model with a Welch t-test at p < ``--alpha``.
+and beats every other model with a Welch t-test at p < ``--alpha``. Concentration
+metrics are never bolded: the question there is whether two models are
+indistinguishable, not which one wins.
 """
 
 from __future__ import annotations
@@ -43,6 +48,12 @@ MODEL_TITLES = {
 }
 _TABLE1_METRICS = [("ll", "LL"), ("elbo", "L[q]"), ("re", "RE"), ("kl", "KL")]
 _KNN_METRICS = [("acc_100", "N=100"), ("acc_600", "N=600"), ("acc_1000", "N=1000")]
+_CONCENTRATION_METRICS = [
+    ("far_side_pct", "far-side %"),
+    ("antipodal_pct", "antipodal %"),
+    ("r_bar", "R̄"),
+    ("equivalent_kappa", "kappa_eq"),
+]
 _BOLDABLE = {"ll", "elbo", "re", "acc_100", "acc_600", "acc_1000"}
 
 Results = dict[tuple[str, int], dict[str, list[float]]]
@@ -57,7 +68,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--kind",
-        choices=["table1", "knn", "confidence", "confidence_epsilon"],
+        choices=["table1", "knn", "confidence", "confidence_epsilon", "concentration"],
         default="table1",
     )
     parser.add_argument("--prefix", default="mnist")
@@ -68,15 +79,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--alpha", type=float, default=0.01)
     args = parser.parse_args(argv)
 
-    metrics = (
-        _KNN_METRICS
-        if args.kind in ("knn", "confidence", "confidence_epsilon")
-        else _TABLE1_METRICS
-    )
+    metrics = {
+        "knn": _KNN_METRICS,
+        "confidence": _KNN_METRICS,
+        "confidence_epsilon": _KNN_METRICS,
+        "concentration": _CONCENTRATION_METRICS,
+        "table1": _TABLE1_METRICS,
+    }[args.kind]
     filenames = {
         "knn": "svae_knn_final.json",
         "confidence": "confidence_probe_final.json",
         "confidence_epsilon": "confidence_probe_epsilon_final.json",
+        "concentration": "concentration_final.json",
         "table1": f"svae_metrics_final_{args.split}.json",
     }
     filename = filenames[args.kind]
