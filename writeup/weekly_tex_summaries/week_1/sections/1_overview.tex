@@ -1,0 +1,13 @@
+The goal of this week's research was to produce a working VAE using the spherical
+TNBBeta distribution as a variational approximation to the true posterior
+on at least one dataset. By ``working,'' I simply mean stable convergence of the
+-ELBO objective. I was able to get that out of the way on day 1 and spent the rest
+of the week replicating the experiments in \citep{davidson2022hypersphericalvariationalautoencoders}
+and understanding where this spherical approach sits relative to the existing
+vMF-based (S-VAE) approach.
+
+On all experiments I ran, both spherical VAEs' results matched. What is even more
+curious is that the geometry of the TNBBeta-VAE's latent space appears to match
+that of the S-VAE. The additional expressivity gained from the TNBBeta is thrown
+away during training, and the per-point posteriors converge to caps on the unit
+hypersphere.
