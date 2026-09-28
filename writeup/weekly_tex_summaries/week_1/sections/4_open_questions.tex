@@ -1,0 +1,14 @@
+It's surprising that, despite all the expressivity of the univariate TNBBeta distribution,
+there is little difference between the latent spaces in both hyperspherical VAEs tested above.
+It would be worth understanding whether this is a theoretical necessity, or if this is simply
+a domain-specific quirk that may not hold in other datasets. I tried fixing some parameters
+to see if I could force ring-like posteriors. Fixing $\boldsymbol{\mu}$ only resulted in
+situations in which $p \to 0$ and $q \to 1$. When I fixed $\varepsilon$, $q$ replaced $\varepsilon$
+as a concentratio parameter in the posterior. Essentially, I have a sense that the S-VAE and
+TNBBeta-VAE are producing highly similar posteriors in low dimensions, and I would like to understand
+why.
+
+Additionally, the SphericalTNBBeta VAE presents an alternative to the S-VAE that has faster sampling
+and is more stable in high dimensions. This is the same conclusion as \citep{decao2020powersphericaldistribution}'s
+power spherical distribution. In this light, it is worth understanding how these two hyperspherical
+approaches to VAEs differ.

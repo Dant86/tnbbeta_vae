@@ -1,0 +1,34 @@
+\pdfoutput=1
+\documentclass[12pt]{article}
+% Load preamble (packages, math, definitions, comments)
+\input{preamble}
+% Bibliography: natbib (for biblatex, see preamble/minimalist_biblatex.tex)
+\usepackage{natbib}
+% Provides author/affiliation formatting with italic affiliations
+\usepackage[affil-it]{authblk}
+
+\title{Week 3 Summary}
+% \date{}
+\author[1,2]{Vedant Pathak}
+
+\affil[1]{Department of Statistics, University of Chicago}
+\affil[2]{Data Science Institute, University of Chicago}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+    \input{sections/0_abstract.tex}
+\end{abstract}
+
+\section{Overview}
+\input{sections/1_overview.tex}
+
+\section{Results}
+\input{sections/2_results.tex}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

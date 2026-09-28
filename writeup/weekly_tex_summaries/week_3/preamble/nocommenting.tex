@@ -1,0 +1,10 @@
+% Production mode: error on leftover draft comments
+% Switch to commenting.tex during drafting
+
+\newcommand{\LATER}[1]{\PackageError{nocommenting}{Leftover LATER comment}{Remove all LATER comments before final build}}
+\newcommand{\fLATER}[1]{\PackageError{nocommenting}{Leftover fLATER comment}{Remove all fLATER comments before final build}}
+\newcommand{\TBD}[1]{\PackageError{nocommenting}{Leftover TBD comment}{Remove all TBD comments before final build}}
+\newcommand{\fTBD}[1]{\PackageError{nocommenting}{Leftover fTBD comment}{Remove all fTBD comments before final build}}
+\newcommand{\PROBLEM}[1]{\PackageError{nocommenting}{Leftover PROBLEM comment}{Remove all PROBLEM comments before final build}}
+\newcommand{\fPROBLEM}[1]{\PackageError{nocommenting}{Leftover fPROBLEM comment}{Remove all fPROBLEM comments before final build}}
+\newcommand{\NA}[1]{#1}

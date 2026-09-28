@@ -1,0 +1,39 @@
+\pdfoutput=1
+\documentclass[12pt]{article}
+% Load preamble (packages, math, definitions, comments)
+\input{preamble}
+% Bibliography: natbib (for biblatex, see preamble/minimalist_biblatex.tex)
+\usepackage{natbib}
+% Provides author/affiliation formatting with italic affiliations
+\usepackage[affil-it]{authblk}
+
+\title{TNBBeta-VAE Research Summary: Week 1}
+% \date{}
+\author[1]{Vedant Pathak}
+
+\affil[1]{Department of Statistics, University of Chicago}
+\date{September 26\textsuperscript{th}, 2026}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+\input{sections/1_overview.tex}
+
+\section{Recap and Problem Setup}
+\input{sections/2_recap.tex}
+
+\section{Results}
+\label{sec:results}
+\input{sections/3_results.tex}
+
+\section{Open Questions}
+\input{sections/4_open_questions.tex}
+
+\section*{Acknowledgement of Generative AI Use}
+\input{sections/5_genai_ack.tex}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
