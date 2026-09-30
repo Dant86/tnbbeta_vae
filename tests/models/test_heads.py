@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from tnbbeta_vae.models.heads import tnbbeta_posterior, vmf_posterior
+from tnbbeta_vae.models.heads import (
+    power_spherical_posterior,
+    tnbbeta_posterior,
+    vmf_posterior,
+)
 
 
 def _raw_with_zero_rows(dim: int) -> torch.Tensor:
@@ -25,6 +29,22 @@ def test_vmf_head_gives_unit_directions_even_for_zero_rows() -> None:
     assert torch.allclose(posterior.loc.norm(dim=-1), torch.ones(5), atol=1e-6)
     assert torch.equal(posterior.loc[1], torch.tensor([1.0, 0, 0, 0, 0, 0]))
     assert torch.allclose(posterior.loc[0], raw_mean[0] / raw_mean[0].norm(), atol=1e-6)
+    z = posterior.rsample()
+    assert torch.allclose(z.norm(dim=-1), torch.ones(5), atol=1e-4)
+    z.sum().backward()
+    assert raw_mean.grad is not None and torch.isfinite(raw_mean.grad).all()
+
+
+def test_power_spherical_head_gives_unit_directions_even_for_zero_rows() -> None:
+    raw_mean = _raw_with_zero_rows(6)
+
+    posterior = power_spherical_posterior(raw_mean, torch.zeros(5, 1))
+
+    assert torch.isfinite(posterior.mean_direction).all()
+    assert torch.allclose(
+        posterior.mean_direction.norm(dim=-1), torch.ones(5), atol=1e-6
+    )
+    assert torch.equal(posterior.mean_direction[1], torch.tensor([1.0, 0, 0, 0, 0, 0]))
     z = posterior.rsample()
     assert torch.allclose(z.norm(dim=-1), torch.ones(5), atol=1e-4)
     z.sum().backward()

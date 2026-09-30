@@ -4,10 +4,11 @@ Usage:
     uv run python -m apps.eval.confidence_probe --run-name NAME [--checkpoint final] \
         [--param p|epsilon] [--label-counts 100 600 1000] [--num-subsets 20] [--k 5]
 
-The Gaussian's per-example mean standard deviation, vMF's kappa and TNBBeta's confidence
-scalar are each a single scalar carrying no directional information. Running the same
-k-NN probe as ``apps.eval.svae_knn`` on that scalar alone tests whether a family routes
-class information through it, separately from the mean direction.
+The Gaussian's per-example mean standard deviation, vMF's kappa, Power Spherical's
+kappa and TNBBeta's confidence scalar are each a single scalar carrying no
+directional information. Running the same k-NN probe as ``apps.eval.svae_knn`` on
+that scalar alone tests whether a family routes class information through it,
+separately from the mean direction.
 
 TNBBeta has two candidate confidence scalars, and which one is the fair comparison to
 vMF's kappa depends on how training actually shapes the posterior: on MNIST it collapses
@@ -15,11 +16,12 @@ to the q=0, p->1 special case (a cap at the mean direction, same shape as vMF's)
 saturates near 1 with almost no spread and cannot carry class information by
 construction -- epsilon (the cap's thickness in that special case) is the parameter
 actually analogous to kappa there. ``--param`` defaults to p (matching the original
-per-family default: mean std for Gaussian, kappa for vMF, p for TNBBeta) for
-backward compatibility with already-computed results; pass ``--param epsilon`` for
-the fairer TNBBeta comparison. Passing ``--param epsilon`` for a non-TNBBeta run
-(no such parameter) prints a message and exits without writing anything, so it is
-safe to chain unconditionally across every model in a sweep.
+per-family default: mean std for Gaussian, kappa for vMF and Power Spherical, p for
+TNBBeta) for backward compatibility with already-computed results; pass
+``--param epsilon`` for the fairer TNBBeta comparison. Passing ``--param epsilon``
+for a non-TNBBeta run (no such parameter) prints a message and exits without
+writing anything, so it is safe to chain unconditionally across every model in a
+sweep.
 
 Writes ``confidence_probe_<checkpoint>.json`` for the default parameter
 (unchanged, so already-backfilled runs stay valid) or
@@ -48,6 +50,7 @@ _DEFAULT_PARAM = {
     "conv_gaussian_vae": "mean_std",
     "conv_vmf_vae": "kappa",
     "conv_tnbbeta_spherical_vae": "p",
+    "conv_power_spherical_vae": "kappa",
 }
 _EXTRACTORS: dict[tuple[str, str], Any] = {
     ("conv_gaussian_vae", "mean_std"): lambda p: p.base_dist.scale.mean(
@@ -56,6 +59,7 @@ _EXTRACTORS: dict[tuple[str, str], Any] = {
     ("conv_vmf_vae", "kappa"): lambda p: p.scale,
     ("conv_tnbbeta_spherical_vae", "p"): lambda p: p.p.unsqueeze(-1),
     ("conv_tnbbeta_spherical_vae", "epsilon"): lambda p: p.epsilon.unsqueeze(-1),
+    ("conv_power_spherical_vae", "kappa"): lambda p: p.kappa.unsqueeze(-1),
 }
 
 

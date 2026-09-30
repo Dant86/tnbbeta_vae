@@ -1,9 +1,9 @@
-"""An MLP VAE for vector data with a Gaussian, vMF or TNBBeta latent.
+"""An MLP VAE for vector data with a Gaussian, vMF, Power Spherical or TNBBeta latent.
 
 Used for small synthetic experiments (e.g. recovering a circle from a noisy
 embedding in R^100, S-VAE paper section 5.1). The encoder and decoder are plain
 MLPs; the latent family only changes the posterior head, the prior and the KL
-(exact for the Gaussian and vMF, Monte Carlo for TNBBeta).
+(exact for the Gaussian, vMF and Power Spherical, Monte Carlo for TNBBeta).
 """
 
 from __future__ import annotations
@@ -30,8 +30,9 @@ class MlpVAEConfig(BaseModel):
     """Hyperparameters for :class:`MlpVAE`.
 
     Attributes:
-        family: Latent family: ``"gaussian"`` (N(0, I) prior), ``"vmf"`` or
-            ``"tnbbeta"`` (both with the uniform-sphere prior).
+        family: Latent family: ``"gaussian"`` (N(0, I) prior), ``"vmf"``,
+            ``"power_spherical"`` or ``"tnbbeta"`` (all three with the
+            uniform-sphere prior).
         input_dim: Dimension of the data vectors.
         hidden_dims: Encoder hidden sizes; the decoder mirrors them in reverse.
         latent_dim: Latent dimension (the sphere is ``S^(latent_dim - 1)``).
