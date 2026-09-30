@@ -11,7 +11,7 @@ from tnbbeta_vae.models import MlpVAE, MlpVAEConfig
 from tnbbeta_vae.models.losses import importance_weighted_metrics
 from tnbbeta_vae.registry import build_model, list_registered_models
 
-_FAMILIES = ["gaussian", "vmf", "tnbbeta"]
+_FAMILIES = ["gaussian", "vmf", "tnbbeta", "power_spherical"]
 
 
 def _model(family: Any, latent_dim: int = 3) -> MlpVAE:

@@ -2,8 +2,9 @@
 
 M1 is a VAE ``x -> z1``. M2 sits on z1 with a class ``y`` and a second latent ``z2``:
 ``q(y|z1)`` (the classifier), ``q(z2|z1, y)`` and ``p(z1|y, z2)``. Both latents may
-follow any family (Gaussian, vMF or TNBBeta), which gives the paper's N+N, S+S and S+N
-models and the TNBBeta variants. Everything is trained end to end on one objective::
+follow any family (Gaussian, vMF, Power Spherical or TNBBeta), which gives the paper's
+N+N, S+S and S+N models and the TNBBeta variants. Everything is trained end to end on
+one objective::
 
     labelled:    -L(x, y)  = -(A + B_y)               + alpha N * CE(q(y|z1), y)
     unlabelled:  -U(x)     = -(A + sum_y q(y|z1) B_y + H(q(y|z1)))
