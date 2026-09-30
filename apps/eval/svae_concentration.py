@@ -6,9 +6,10 @@ Usage:
 Two questions, in the order they need answering: first *shape* -- is each class a
 single unimodal cap, or does it have a genuinely different (ring/bimodal) spread the
 ring-exclusion check below would catch -- and only once that holds does a *magnitude*
-comparison (how tight is the cap) mean anything. Applies to ``conv_vmf_vae`` and
-``conv_tnbbeta_spherical_vae`` runs (vMF structurally cannot produce anything but a
-cap, so it is included as the reference case); a no-op for any other model.
+comparison (how tight is the cap) mean anything. Applies to ``conv_vmf_vae``,
+``conv_power_spherical_vae`` and ``conv_tnbbeta_spherical_vae`` runs (vMF and Power
+Spherical structurally cannot produce anything but a cap, so they are included as
+reference cases); a no-op for any other model.
 
 For each class, using every test image's posterior centre direction
 (``VonMisesFisher.loc`` or TNBBeta's alias-resolved ``mode_direction``):
@@ -48,6 +49,7 @@ from tnbbeta_vae.training import load_model_checkpoint
 
 _FAMILY_BY_MODEL: dict[str, LatentFamily] = {
     "conv_vmf_vae": "vmf",
+    "conv_power_spherical_vae": "power_spherical",
     "conv_tnbbeta_spherical_vae": "tnbbeta",
 }
 _FAR_SIDE_COSINE = 0.0
