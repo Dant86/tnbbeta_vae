@@ -26,6 +26,7 @@ import sys
 from typing import Any, cast
 
 import numpy as np
+import scipy.sparse as sp
 import torch
 
 from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
@@ -177,7 +178,10 @@ def run_once(
         metrics are then those of the best epoch before it, or chance level if none).
     """
     torch.manual_seed(seed)
-    upper = np.stack(np.nonzero(np.triu(split.train_adjacency.toarray(), k=1)))
+    # Sparse upper-triangle extraction, not .toarray() -- densifying the whole
+    # adjacency (317,080 x 317,080 for com-DBLP) would try to allocate ~375GiB.
+    upper_triangle: Any = sp.triu(split.train_adjacency, k=1).tocoo()
+    upper = np.stack([upper_triangle.row, upper_triangle.col])
     # Convert features: if scipy.sparse (Planetoid), convert to dense torch.Tensor;
     # if already torch.sparse (SNAP), keep as-is (GraphVAE handles sparse features).
     if hasattr(graph.features, "tocoo"):
