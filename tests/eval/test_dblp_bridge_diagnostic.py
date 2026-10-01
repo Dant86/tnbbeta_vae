@@ -213,6 +213,62 @@ def test_posterior_stats_tnbbeta_spherical_entropy_is_nan_not_a_crash() -> None:
     posterior = TNBBetaSpherical(mean_direction, p, q, epsilon)
     mask = torch.ones(5, dtype=torch.bool)
 
-    stats = _posterior_stats(posterior, mask, {"family": "tnbbeta"})
+    stats = _posterior_stats(posterior, mask, {"family": "tnbbeta", "latent_dim": 3})
 
     assert math.isnan(stats["entropy_mean"])
+
+
+def test_posterior_stats_r_bar_is_per_node_not_cross_node_alignment() -> None:
+    """Regression test for the averaging-order bug: a previous version averaged
+    sample means across nodes before taking one norm, so two tightly concentrated
+    nodes pointed in OPPOSITE directions cancelled to r_bar~0 -- reporting "diffuse"
+    for a subset that is actually two sharply concentrated populations. The fix
+    norms each node's own sample mean first, then averages those norms, so this
+    case correctly reports high (not low) concentration.
+    """
+    mean_direction = torch.tensor([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]])
+    kappa = torch.full((2, 1), 500.0)  # sharply concentrated at each node
+    posterior = VonMisesFisher(mean_direction, kappa)
+    mask = torch.ones(2, dtype=torch.bool)
+
+    stats = _posterior_stats(posterior, mask, {"family": "vmf"})
+
+    assert stats["r_bar"] > 0.9  # each node is individually concentrated
+
+
+def test_posterior_stats_tnbbeta_reports_parameter_marginals_and_bimodal_fraction() -> (
+    None
+):
+    """TNBBeta's own (p, q, epsilon) and the fraction of nodes past the proven
+    bimodal threshold (m = epsilon - (latent_dim - 1) / 2 < 0, expressivity
+    write-up's Theorem 5.1/Corollary 5.3) are reported -- the one diagnostic that
+    directly tests whether a subset of nodes is actually using TNBBeta's extra
+    capacity, not just a proxy for it.
+    """
+    mean_direction = _normalized(torch.randn(4, 3))  # latent_dim 3 -> threshold 1.0
+    p = torch.tensor([0.6, 0.7, 0.8, 0.9])
+    q = torch.tensor([0.1, 0.2, 0.3, 0.4])
+    epsilon = torch.tensor([0.5, 0.5, 2.0, 2.0])  # first two bimodal, last two not
+    posterior = TNBBetaSpherical(mean_direction, p, q, epsilon)
+    mask = torch.ones(4, dtype=torch.bool)
+
+    stats = _posterior_stats(posterior, mask, {"family": "tnbbeta", "latent_dim": 3})
+
+    assert stats["p_mean"] == pytest.approx(0.75)
+    assert stats["epsilon_mean"] == pytest.approx(1.25)
+    assert stats["m_mean"] == pytest.approx(1.25 - 1.0)
+    assert stats["frac_bimodal"] == pytest.approx(0.5)
+
+
+def test_posterior_stats_omits_tnbbeta_fields_for_other_families() -> None:
+    """vMF/Power Spherical posteriors have no (p, q, epsilon) -- confirms the
+    TNBBeta-only fields are simply absent, not NaN-filled, for other families."""
+    mean_direction = _normalized(torch.randn(3, 3))
+    kappa = torch.full((3, 1), 2.0)
+    posterior = VonMisesFisher(mean_direction, kappa)
+    mask = torch.ones(3, dtype=torch.bool)
+
+    stats = _posterior_stats(posterior, mask, {"family": "vmf"})
+
+    assert "p_mean" not in stats
+    assert "frac_bimodal" not in stats
