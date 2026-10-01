@@ -22,16 +22,24 @@ for these bridge nodes. We test two hypotheses:
 
 **Design decisions:**
 
-- **Primary vs. secondary community**: For each bridge node, we count how many edges it
-  has within each community it belongs to. The community with the most edges is the
-  "primary" community (where most of the node's neighborhood sits). Any other community
-  it belongs to is a "secondary" community. Link-prediction accuracy is measured
-  separately for edges into primary vs. secondary communities to isolate the effect.
+- **Primary vs. secondary community**: For each bridge node, ``snap_community.py``'s
+  ``primary_secondary_communities`` counts, for each community the node belongs to, how
+  many of the node's *graph* neighbors (from the full, un-split adjacency -- this is
+  ground-truth structure, not something being predicted) are themselves members of that
+  community. The community with the highest such count is "primary"; every other
+  community the node belongs to is "secondary". Link-prediction accuracy is then
+  measured separately on test edges classified against each bridge node's primary vs.
+  secondary communities, to isolate the effect.
 
 - **Posterior statistics**: For TNBBeta, report (p, q, epsilon) marginals for bridge vs.
   non-bridge nodes. For vMF and Power Spherical, report concentration (equivalent kappa
   via r-bar, analogous to svae_concentration.py). Report posterior entropy as a
   model-agnostic bimodality proxy.
+
+- **Node-ID space**: community membership and bridge nodes are loaded in the raw SNAP ID
+  space and translated into the graph's internal ``0..n-1`` IDs via
+  ``Graph.node_id_map`` (``snap_community.remap_communities``), not by assuming any
+  particular order the loader happened to use.
 
 - **Correctness caveat**: This diagnostic is hand-rolled for com-DBLP's specific
   structure. If a future dataset has different community semantics (not publication
@@ -63,16 +71,14 @@ from tnbbeta_vae.data.snap_community import (
 from tnbbeta_vae.data.snap_community import (
     load_snap_communities,
     load_snap_community,
+    primary_secondary_communities,
+    remap_communities,
 )
 from tnbbeta_vae.models import GraphBatch
-from tnbbeta_vae.models.heads import LatentFamily, posterior_centre
+from tnbbeta_vae.models.heads import posterior_centre
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import load_model_checkpoint
-
-_FAMILY_BY_MODEL: dict[str, LatentFamily] = {
-    "graph_vae": "tnbbeta",  # default; check config.family in actual checkpoint
-}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -98,14 +104,14 @@ def main(argv: list[str] | None = None) -> None:
     communities = load_snap_communities(data_dir() / "snap_community", "dblp")
     split = split_edges(graph.adjacency, seed=0)
 
-    # Remap communities and bridge nodes to the graph's internal node IDs.
-    # load_snap_community builds a remapping; we need to invert it.
-    # For now, assume the remapping is identity (nodes 0..n-1 in order of appearance).
-    # This is only valid if SNAP node IDs happen to be contiguous, which they're not.
-    # So we need a more careful approach: load the mapping from the loader.
-    # Since load_snap_community doesn't export the mapping, we'll reconstruct it.
-    remapped_communities = _remap_communities(graph.adjacency.shape[0], communities)
+    # Communities and bridge nodes are loaded in the raw SNAP ID space; translate them
+    # into the graph's internal 0..n-1 IDs via the loader's own node_id_map, rather than
+    # assuming any particular order.
+    remapped_communities = remap_communities(graph.node_id_map, communities)
     remapped_bridges = identify_bridge_nodes(remapped_communities, min_multiplicity=2)
+    bridge_communities = primary_secondary_communities(
+        graph.adjacency, remapped_communities, remapped_bridges
+    )
 
     # Build batch.
     features = graph.features
@@ -139,7 +145,7 @@ def main(argv: list[str] | None = None) -> None:
 
     # Compute link-prediction metrics per edge type.
     link_metrics = _link_prediction_by_bridge_edges(
-        embeddings, split, remapped_bridges, remapped_communities, batch.num_nodes
+        embeddings, split, bridge_communities, remapped_communities
     )
 
     results: dict[str, Any] = {
@@ -161,39 +167,6 @@ def main(argv: list[str] | None = None) -> None:
     output.write_text(json.dumps(results, indent=2))
     print(json.dumps(results, indent=2))
     print(f"Wrote {output}")
-
-
-def _remap_communities(
-    num_nodes: int, original_communities: dict[int, set[int]]
-) -> dict[int, set[int]]:
-    """Maps original SNAP node IDs to internal graph node IDs.
-
-    Since load_snap_community doesn't export the ID mapping, and remapping is done
-    in order of edge appearance, we can't exactly reconstruct the mapping. As a
-    conservative approximation, we remap only the largest community indices (those
-    with the most nodes), assuming they're likely to be in the lower ID range after
-    remapping. For a production diagnostic, load_snap_community should export the
-    mapping explicitly.
-
-    Args:
-        num_nodes: Number of nodes in the loaded graph.
-        original_communities: Original node ID -> set of community indices.
-
-    Returns:
-        Dict mapping remapped node ID -> community indices.
-    """
-    # Collect all original node IDs mentioned in communities.
-    all_original_ids = sorted(original_communities.keys())
-    # Assume they map to 0..len(all_original_ids)-1 in sorted order (this is an
-    # approximation; the actual order depends on edge traversal order).
-    id_remap = {orig_id: i for i, orig_id in enumerate(all_original_ids)}
-
-    remapped_communities = {
-        id_remap[orig_id]: comms
-        for orig_id, comms in original_communities.items()
-        if orig_id in id_remap
-    }
-    return remapped_communities
 
 
 def _posterior_stats(
@@ -241,87 +214,69 @@ def _posterior_stats(
 def _link_prediction_by_bridge_edges(
     embeddings: torch.Tensor,
     split: Any,
-    bridge_nodes: set[int],
+    bridge_communities: dict[int, tuple[int, set[int]]],
     communities: dict[int, set[int]],
-    num_nodes: int,
 ) -> dict[str, Any]:
     """Computes link-prediction metrics broken down by edge type.
 
-    Distinguishes primary and secondary edges for bridge nodes.
-
-    An edge from a bridge node u into community c is "primary" if c is u's largest
-    community (by edge count within u's neighborhood), and "secondary" otherwise.
+    For a bridge node ``b`` with primary community ``p`` and secondary communities
+    ``s`` (``bridge_communities[b]``, from
+    ``snap_community.primary_secondary_communities``), a test edge ``(b, other)`` is a
+    "primary" instance if ``other`` is a member of ``p``, and a "secondary" instance if
+    ``other`` is a member of some community in ``s`` (but not ``p``). Both endpoints of
+    an edge are checked independently, so an edge between two bridge nodes can
+    contribute an instance to each category (once per bridge endpoint's perspective).
+    Every instance in a category is scored against the same pool of sampled test
+    non-edges (``split.test_negative``), the same background used for the aggregate
+    AUC/AP computed elsewhere (e.g. ``apps/link_prediction/main.py``).
 
     Args:
         embeddings: Node embeddings, shape (num_nodes, latent_dim).
         split: LinkSplit with val and test edges.
-        bridge_nodes: Set of remapped node IDs that are bridge nodes.
-        communities: Remapped node ID -> set of community indices.
-        num_nodes: Total number of nodes.
+        bridge_communities: Bridge node ID -> (primary community, secondary
+            communities), from ``snap_community.primary_secondary_communities``.
+        communities: Remapped node ID -> set of community indices, covering every node
+            (bridge or not) that belongs to at least one community.
 
     Returns:
-        Dict with AUC/AP broken down by edge type.
+        Dict with AUC/AP/count broken down by edge type ("primary"/"secondary").
     """
-    # Identify primary and secondary edges for each bridge node.
-    primary_edges = {"positive": [], "negative": []}
-    secondary_edges = {"positive": [], "negative": []}
+    primary_edges: list[tuple[int, int]] = []
+    secondary_edges: list[tuple[int, int]] = []
 
-    for node_id in bridge_nodes:
-        if node_id not in communities:
-            continue
-        node_comms = communities[node_id]
-        if len(node_comms) < 2:
-            continue  # Not truly a bridge node.
+    for raw_u, raw_v in split.test_positive.T:
+        u, v = int(raw_u), int(raw_v)
+        for bridge, other in ((u, v), (v, u)):
+            classification = bridge_communities.get(bridge)
+            if classification is None:
+                continue
+            primary, secondary = classification
+            other_communities = communities.get(other, set())
+            if primary in other_communities:
+                primary_edges.append((u, v))
+            elif other_communities & secondary:
+                secondary_edges.append((u, v))
 
-        # Find primary community: count edges within each community.
-        # (This requires the full adjacency; for now, use a simple heuristic.)
-        # Heuristic: assume the first community in the set is primary.
-        # A production version would count actual edges.
-        # Classify test edges.
-        test_node_edges = split.test_positive[:, split.test_positive[0] == node_id]
-        test_node_edges = np.concatenate(
-            [
-                test_node_edges,
-                split.test_positive[:, split.test_positive[1] == node_id],
-            ],
-            axis=1,
-        )
-
-        for edge in test_node_edges.T:
-            # For now, classify based on incident node. A production version would
-            # look up the actual community membership of the neighbor and count edges.
-            if np.random.rand() < 0.5:  # 50/50 split: this is a placeholder.
-                primary_edges["positive"].append(edge)
-            else:
-                secondary_edges["positive"].append(edge)
-
-    # Score edges.
     values = embeddings.numpy()
-    metrics = {}
+    neg_scores = (values[split.test_negative[0]] * values[split.test_negative[1]]).sum(
+        -1
+    )
 
-    for edge_type, edges_dict in [
+    metrics: dict[str, Any] = {}
+    for edge_type, edges in (
         ("primary", primary_edges),
         ("secondary", secondary_edges),
-    ]:
-        if not edges_dict["positive"]:
+    ):
+        if not edges:
             metrics[edge_type] = {"auc": float("nan"), "ap": float("nan"), "count": 0}
             continue
-
-        pos_edges = np.array(edges_dict["positive"]).T
+        pos_edges = np.array(edges).T
         pos_scores = (values[pos_edges[0]] * values[pos_edges[1]]).sum(-1)
-        # Negative edges from full test negatives (placeholder).
-        neg_scores = (
-            values[split.test_negative[0]] * values[split.test_negative[1]]
-        ).sum(-1)
-        auc = roc_auc(pos_scores, neg_scores)
-        ap = average_precision(pos_scores, neg_scores)
-
         metrics[edge_type] = {
-            "auc": float(auc),
-            "ap": float(ap),
+            "auc": float(roc_auc(pos_scores, neg_scores)),
+            "ap": float(average_precision(pos_scores, neg_scores)),
             "count": len(pos_scores),
         }
-
     return metrics
 
 

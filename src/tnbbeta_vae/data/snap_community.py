@@ -2,7 +2,7 @@
 
 Loads undirected graphs from SNAP's community detection archive, with node IDs remapped
 to a contiguous 0..n-1 range and features as sparse identity matrices (suitable for
-featureless graphs like co-DBLP). Provides community membership parsing and bridge-node
+featureless graphs like com-DBLP). Provides community membership parsing and bridge-node
 identification for targeted diagnostics.
 
 The edge list format is two whitespace/tab-separated node IDs per line, with lines
@@ -29,6 +29,8 @@ __all__ = [
     "bridge_nodes",
     "load_snap_community",
     "load_snap_communities",
+    "primary_secondary_communities",
+    "remap_communities",
 ]
 
 # Scipy's sparse types are loosely typed, so matrices are annotated as ``Any``.
@@ -47,10 +49,17 @@ class Graph:
         features: Node features, shape ``(n, n)`` or ``(n, in_features)``.
             Stored as scipy.sparse or torch.sparse. For SNAP graphs with identity
             features, use torch.sparse_coo_tensor.
+        node_id_map: Raw SNAP node ID (as it appears in the edge list and community
+            files) -> its index in this graph's ``0..n-1`` node space. Built from the
+            order nodes were first seen while reading the edge list, which is *not*
+            sorted order in general -- any code that needs to relate a raw SNAP ID
+            (e.g. from ``load_snap_communities``) to a row/column of ``adjacency`` or
+            ``features`` must go through this mapping rather than assume one.
     """
 
     adjacency: SparseMatrix
     features: Any  # scipy.sparse or torch.sparse tensor
+    node_id_map: dict[int, int]
 
 
 def load_snap_community(root: Path, name: str) -> Graph:
@@ -66,7 +75,9 @@ def load_snap_community(root: Path, name: str) -> Graph:
     Returns:
         The graph with sparse identity features as torch.sparse_coo_tensor (no real node
         features in SNAP datasets). Adjacency is scipy.sparse for compatibility with
-        split_edges/normalized_adjacency pipeline.
+        split_edges/normalized_adjacency pipeline. ``Graph.node_id_map`` carries the
+        raw-SNAP-ID -> internal-ID mapping this function builds, for relating other
+        SNAP files (e.g. community membership) to the same node space.
     """
     edge_file = root / f"com-{name}.ungraph.txt.gz"
 
@@ -114,16 +125,16 @@ def load_snap_community(root: Path, name: str) -> Graph:
         indices, values, (num_nodes, num_nodes), dtype=torch.float32
     ).coalesce()
 
-    return Graph(adjacency, features)
+    return Graph(adjacency, features, node_id_map)
 
 
 def load_snap_communities(root: Path, name: str) -> dict[int, set[int]]:
     """Loads community membership from ``root/com-<name>.all.cmty.txt.gz``.
 
     Parses the community file into a mapping of node IDs (in the original SNAP ID space,
-    before remapping) to the set of community indices they belong to. To use this with
-    the remapped node IDs from load_snap_community, apply the remapping manually or
-    pass the node_id_map from load_snap_community.
+    before remapping) to the set of community indices they belong to. Use
+    :func:`remap_communities` with the ``node_id_map`` from :func:`load_snap_community`
+    to translate the result into the same graph's internal node-ID space.
 
     Args:
         root: Directory holding the raw files.
@@ -170,3 +181,67 @@ def bridge_nodes(
         for node_id, communities in memberships.items()
         if len(communities) >= min_multiplicity
     }
+
+
+def remap_communities(
+    node_id_map: dict[int, int], memberships: dict[int, set[int]]
+) -> dict[int, set[int]]:
+    """Reindexes community membership from raw SNAP node IDs to a graph's internal IDs.
+
+    Args:
+        node_id_map: Raw SNAP node ID -> internal ``0..n-1`` index, i.e.
+            ``Graph.node_id_map`` from :func:`load_snap_community` for the same graph.
+        memberships: Raw SNAP node ID -> set of community indices, as from
+            :func:`load_snap_communities`.
+
+    Returns:
+        Internal node ID -> set of community indices. Raw IDs mentioned in
+        ``memberships`` but absent from ``node_id_map`` (e.g. isolated nodes that never
+        appear in the edge list) are dropped.
+    """
+    return {
+        node_id_map[raw_id]: communities
+        for raw_id, communities in memberships.items()
+        if raw_id in node_id_map
+    }
+
+
+def primary_secondary_communities(
+    adjacency: SparseMatrix, memberships: dict[int, set[int]], bridges: set[int]
+) -> dict[int, tuple[int, set[int]]]:
+    """Splits each bridge node's communities into one primary and the rest secondary.
+
+    For a bridge node ``b``, counts, separately for each community ``c`` it belongs to,
+    how many of ``b``'s graph neighbors are themselves members of ``c``. ``b``'s primary
+    community is the one with the highest such count (ties broken by the smaller
+    community index, for determinism); every other community ``b`` belongs to is
+    secondary.
+
+    Args:
+        adjacency: The graph's symmetric adjacency, in the same (internal) node-ID
+            space as ``memberships`` and ``bridges``.
+        memberships: Internal node ID -> set of community indices (e.g. the output of
+            :func:`remap_communities`), covering both bridge nodes and their neighbors.
+        bridges: Internal IDs of the bridge nodes to classify, e.g. from
+            :func:`bridge_nodes`.
+
+    Returns:
+        Bridge node ID -> ``(primary community index, secondary community indices)``.
+        Bridge nodes absent from ``memberships`` are skipped.
+    """
+    adjacency = adjacency.tocsr()
+    result: dict[int, tuple[int, set[int]]] = {}
+    for node in bridges:
+        node_communities = memberships.get(node)
+        if not node_communities:
+            continue
+        start, end = adjacency.indptr[node], adjacency.indptr[node + 1]
+        neighbors = adjacency.indices[start:end]
+        edge_counts = dict.fromkeys(node_communities, 0)
+        for neighbor in neighbors:
+            shared = node_communities & memberships.get(int(neighbor), set())
+            for community in shared:
+                edge_counts[community] += 1
+        primary = min(node_communities, key=lambda c: (-edge_counts[c], c))
+        result[node] = (primary, node_communities - {primary})
+    return result
