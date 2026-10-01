@@ -59,6 +59,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+import scipy.sparse as sp
 import torch
 
 if TYPE_CHECKING:
@@ -120,7 +121,10 @@ def main(argv: list[str] | None = None) -> None:
     elif isinstance(features, torch.Tensor):
         features = features.to(dtype=torch.float32)
 
-    upper = np.stack(np.nonzero(np.triu(split.train_adjacency.toarray(), k=1)))
+    # Sparse upper-triangle extraction, not .toarray() -- densifying the whole
+    # adjacency (317,080 x 317,080 for com-DBLP) would try to allocate ~375GiB.
+    upper_triangle: Any = sp.triu(split.train_adjacency, k=1).tocoo()
+    upper = np.stack([upper_triangle.row, upper_triangle.col])
     batch = GraphBatch(
         features=features,
         norm_adjacency=normalized_adjacency(split.train_adjacency),
