@@ -54,7 +54,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, choices=list(_DEFAULT_EPOCHS))
     parser.add_argument(
-        "--family", required=True, choices=["gaussian", "vmf", "tnbbeta"]
+        "--family",
+        required=True,
+        choices=["gaussian", "vmf", "tnbbeta", "power_spherical"],
     )
     parser.add_argument("--lrs", nargs="+", type=float, default=[0.01, 0.005, 0.001])
     parser.add_argument("--dropouts", nargs="+", type=float, default=[0.0, 0.2, 0.4])
