@@ -1,20 +1,20 @@
 # TNBBeta-VAE and S-VAE Convergence Check: 2026-10-01
 
 - **Date:** 2026-10-01
-- **Branch/commit:** `feat/vmf-tnbbeta-convergence`, commit `9ab5679` (original
-  implementation) with review fixes on top -- see "Review fixes" below for
-  what changed and why; this report's numbers were produced after those
-  fixes, not against `9ab5679` itself.
+- **Branch/commit:** `feat/vmf-tnbbeta-convergence`, commit `1d38e72`
+  ("Review fixes for the vMF/TNBBeta convergence check; commit the results
+  write-up"). This is a review pass on top of this branch's original
+  implementation, commit `9ab5679` -- see "Review fixes" below for what
+  changed and why; this report's numbers were produced with those fixes
+  applied, not against `9ab5679` itself.
 - **Command (Part 1 numbers in this report):**
   ```
   uv run python -m apps.distributions.vmf_tnbbeta_convergence \
       --output-csv /tmp/vmf_tnbbeta_convergence_part1.csv
   ```
   (default `--sample-size 100000 --bisect-tol 1e-4`; deterministic given the
-  default bisection `seed=0` -- re-running reproduces this report's table
-  exactly.)
-- **Command (table regenerated after review fixes, superseding the table
-  originally produced from `9ab5679`):** same as above.
+  default bisection `seed=0` -- re-running against commit `1d38e72`
+  reproduces this report's table exactly.)
 
 ## Summary
 
