@@ -40,6 +40,38 @@ each.
   limit-path question in the Theory section: whatever the right scaling
   ansatz is, it needs to explain epsilon tracking $d$ at low dimension and
   then growing faster than $d$ by $d=40$.
+- **MNIST never leverages TNBBeta's bimodal capacity -- confirmed precisely
+  against the proven threshold, not just eyeballed from the chart above.**
+  These runs use ambient dimension $d+1$ (`tnbs`'s convention, CLAUDE.md), so
+  the bimodality boundary (`tnbbeta_vs_power_spherical_expressivity.md`,
+  Theorem 5.1/Corollary 5.3) is $m=\varepsilon-\tfrac{(d+1)-1}{2}=\varepsilon-\tfrac{d}{2}<0$.
+  Averaging each dimension's final `posterior_epsilon_mean` over its 5 seeds
+  (same `cluster_runs/` data as above) and comparing against $d/2$:
+
+  | $d$ | $\varepsilon$ (mean, final) | threshold $d/2$ | $m$ | $\varepsilon/(d/2)$ |
+  |---|---|---|---|---|
+  | 2 | 2.69 | 1.0 | +1.69 | 2.7x |
+  | 5 | 5.63 | 2.5 | +3.13 | 2.3x |
+  | 10 | 10.56 | 5.0 | +5.56 | 2.1x |
+  | 20 | 22.19 | 10.0 | +12.19 | 2.2x |
+  | 40 | 57.51 | 20.0 | +37.51 | 2.9x |
+
+  $m$ is strongly positive at every dimension tested -- $\varepsilon$ doesn't
+  just clear the unimodal threshold, it settles at roughly **2-3x** it,
+  consistently, regardless of whether $\varepsilon$ is tracking $d$ linearly
+  (low/mid $d$) or growing faster than $d$ ($d=40$). This is the exact
+  opposite regime from `dblp_bridge_diagnostic_2026-10-01.md`'s corrected
+  shape diagnostic, where `frac_bimodal` $=1.000$ for every com-DBLP node,
+  bridge or not: MNIST's digits apparently never need TNBBeta's extra
+  (bimodal) capacity at all, while com-DBLP's featureless co-authorship graph
+  always does, independent of a node's own community count. Whatever
+  determines which regime a dataset lands in looks like a property of the
+  task/data (a 10-class image classification likelihood vs. a featureless
+  graph's structural link-prediction likelihood), not of per-node structure
+  within one dataset -- community count only modulates *how far* into the
+  already-universal bimodal regime a com-DBLP node sits (`q`, `m`), not
+  *whether* it's there, mirroring how dimension here only modulates how far
+  into the unimodal regime MNIST sits, not whether it's there.
 
 ## `kappa_trajectories.png`
 
