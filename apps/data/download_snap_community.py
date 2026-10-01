@@ -20,6 +20,19 @@ from tnbbeta_vae.data.snap_community import (
 )
 from tnbbeta_vae.paths import data_dir
 
+# SNAP's "ground-truth communities" datasets are hosted under this path, not under
+# /data/ directly (verified against the live site, not the HTML page's prose, which
+# describes the same files with URLs that 404).
+_BASE_URL = "https://snap.stanford.edu/data/bigdata/communities"
+
+# Most datasets' community file is "com-<name>.all.cmty.txt.gz", but Amazon's is named
+# "com-amazon.all.dedup.cmty.txt.gz" on SNAP's server -- saved locally under the common
+# "com-<name>.all.cmty.txt.gz" name regardless, so the loader doesn't need to know this.
+_COMMUNITY_FILE_SOURCE_NAME = {
+    "dblp": "com-dblp.all.cmty.txt.gz",
+    "amazon": "com-amazon.all.dedup.cmty.txt.gz",
+}
+
 
 def main(argv: list[str] | None = None) -> None:
     """Downloads and verifies the requested datasets.
@@ -40,20 +53,20 @@ def main(argv: list[str] | None = None) -> None:
     root.mkdir(parents=True, exist_ok=True)
 
     for name in args.datasets:
-        base_url = "https://snap.stanford.edu/data"
         # Download edge list (ungraph = undirected graph).
         edge_file = root / f"com-{name}.ungraph.txt.gz"
         if not edge_file.exists():
             urlretrieve(
-                f"{base_url}/com-{name}.ungraph.txt.gz",
+                f"{_BASE_URL}/com-{name}.ungraph.txt.gz",
                 edge_file,  # noqa: S310
             )
 
-        # Download community membership file.
+        # Download community membership file (source filename varies by dataset; see
+        # _COMMUNITY_FILE_SOURCE_NAME).
         community_file = root / f"com-{name}.all.cmty.txt.gz"
         if not community_file.exists():
             urlretrieve(
-                f"{base_url}/com-{name}.all.cmty.txt.gz",
+                f"{_BASE_URL}/{_COMMUNITY_FILE_SOURCE_NAME[name]}",
                 community_file,  # noqa: S310
             )
 
