@@ -19,6 +19,11 @@
   plus the 3 `link_prediction/dblp_<family>.json` grid-search summaries,
   rsynced from `/net/spaces/scratch/vpathak/tnbbeta_checkpoints/` into
   `dblp_results/` (local, untracked).
+- **Chart command** (`dblp_dose_response.png`, added with the dose-response
+  update below):
+  ```
+  uv run python -m apps.eval.dblp_dose_response_plot --results-dir dblp_results --output writeup/results/dblp_dose_response.png
+  ```
 
 This is the experiment the whole "TNBBeta vs. Power Spherical" avenue has
 been building toward since Table 1 showed zero aggregate differentiation
@@ -68,6 +73,21 @@ should grow with community count, not just step once at a threshold.
 AP tells the same story, slightly more sharply (the 5+ bucket's AP gap is
 0.058 vs. PS, $p<0.001$, and 0.075 vs. vMF, $p=0.001$; full per-bucket
 numbers in the underlying `bridge_diagnostic_final.json` files).
+
+![AUC and AP vs. community count, each family's mean with a shaded std band, plus an edge-count-per-bucket panel](dblp_dose_response.png)
+
+`dblp_dose_response.png` (`apps.eval.dblp_dose_response_plot`) plots both
+metrics' full mean-$\pm$-std curves against community count, with a third
+panel showing each bucket's edge count (identical across families/seeds, so
+shown once rather than duplicated under each metric) -- the thinner buckets
+(0, 3, 4, each under 17,000 edges, against 1's 62,340 and 5+'s 78,482) are
+visibly less supported, worth keeping in mind for how much weight to put on
+their individual points versus the overall trend. One honest detail visible
+in the chart but not obvious from the table alone: **AP shows a pronounced
+V-shape** (peaking at 1 community, dropping through a trough at 4, then
+recovering sharply at 5+) that AUC does not show nearly as sharply -- all
+three families dip together, so it doesn't affect the gap between them, but
+it's a real feature of the data worth a mention rather than smoothing over.
 
 **Restricted to the actual "more communities $\to$ more expressivity needed"
 ladder (1 through 5+; "0 communities" is a different population, outside the
