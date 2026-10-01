@@ -6,9 +6,18 @@ import math
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 
-from apps.eval.dblp_bridge_diagnostic import _link_prediction_by_bridge_edges
+from apps.eval.dblp_bridge_diagnostic import (
+    _link_prediction_by_bridge_edges,
+    _posterior_stats,
+)
+from tnbbeta_vae.distributions import (
+    PowerSpherical,
+    TNBBetaSpherical,
+    VonMisesFisher,
+)
 
 
 def test_link_prediction_by_bridge_edges_splits_by_real_community_membership() -> None:
@@ -82,3 +91,75 @@ def test_link_prediction_by_bridge_edges_reports_nan_for_an_empty_category() -> 
     assert math.isnan(metrics["primary"]["ap"])
     assert metrics["primary"]["count"] == 0
     assert metrics["secondary"]["count"] == 0
+
+
+def _normalized(vectors: torch.Tensor) -> torch.Tensor:
+    return vectors / vectors.norm(dim=-1, keepdim=True)
+
+
+def test_posterior_stats_power_spherical_entropy_matches_direct_computation() -> None:
+    """Regression test: a previous version wrapped posterior in
+    Independent(posterior, 1) before calling entropy(), which reinterprets the
+    per-node batch dimension into the event and collapses entropy() to a 0-d scalar,
+    crashing on entropy[mask] ("too many indices for tensor of dimension 0"). Power
+    Spherical has a real entropy() (unlike TNBBetaSpherical), so it hit this directly.
+    """
+    mean_direction = _normalized(torch.randn(5, 3))
+    kappa = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+    posterior = PowerSpherical(mean_direction, kappa)
+    mask = torch.tensor([True, True, False, False, False])
+
+    stats = _posterior_stats(posterior, mask, {"family": "power_spherical"})
+
+    expected = posterior.entropy()[mask].mean().item()
+    assert math.isfinite(stats["entropy_mean"])
+    assert stats["entropy_mean"] == pytest.approx(expected)
+    assert stats["num_nodes"] == 2
+
+
+def test_posterior_stats_von_mises_fisher_entropy_matches_direct_computation() -> None:
+    """Same regression as above, for vMF -- it also implements entropy() directly."""
+    mean_direction = _normalized(torch.randn(5, 3))
+    kappa = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0]).unsqueeze(-1)
+    posterior = VonMisesFisher(mean_direction, kappa)
+    mask = torch.tensor([False, True, True, False, False])
+
+    stats = _posterior_stats(posterior, mask, {"family": "vmf"})
+
+    expected = posterior.entropy()[mask].mean().item()
+    assert math.isfinite(stats["entropy_mean"])
+    assert stats["entropy_mean"] == pytest.approx(expected)
+    assert stats["num_nodes"] == 2
+
+
+def test_posterior_stats_von_mises_fisher_r_bar_does_not_crash() -> None:
+    """Regression test: VonMisesFisher.rsample only accepts torch.Size or a bare int
+    (unlike TNBBetaSpherical/PowerSpherical, which accept a plain tuple too) -- a
+    previous version called rsample((100,)), a plain tuple, which VonMisesFisher
+    mishandles as a single non-int "size" and raises TypeError at torch.Size
+    construction, uncaught by _posterior_stats's (AttributeError, RuntimeError)
+    except clause."""
+    mean_direction = _normalized(torch.randn(5, 3))
+    kappa = torch.full((5, 1), 3.0)
+    posterior = VonMisesFisher(mean_direction, kappa)
+    mask = torch.ones(5, dtype=torch.bool)
+
+    stats = _posterior_stats(posterior, mask, {"family": "vmf"})
+
+    assert math.isfinite(stats["r_bar"])
+    assert stats["r_bar"] >= 0.0
+
+
+def test_posterior_stats_tnbbeta_spherical_entropy_is_nan_not_a_crash() -> None:
+    """TNBBetaSpherical has no closed-form entropy -- confirms this stays a graceful
+    NaN (the except branch) after the fix, not a regression."""
+    mean_direction = _normalized(torch.randn(5, 3))
+    p = torch.full((5,), 0.7)
+    q = torch.full((5,), 0.1)
+    epsilon = torch.full((5,), 1.0)
+    posterior = TNBBetaSpherical(mean_direction, p, q, epsilon)
+    mask = torch.ones(5, dtype=torch.bool)
+
+    stats = _posterior_stats(posterior, mask, {"family": "tnbbeta"})
+
+    assert math.isnan(stats["entropy_mean"])
