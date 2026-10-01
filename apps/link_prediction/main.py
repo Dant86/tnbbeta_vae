@@ -1,4 +1,7 @@
-"""Link prediction on citation graphs (S-VAE paper, Table 4).
+"""Link prediction on citation and co-authorship graphs.
+
+Supports Planetoid citation graphs (S-VAE paper, Table 4) and SNAP community graphs
+(co-authorship networks like com-DBLP with documented overlapping communities).
 
 Usage:
     uv run python -m apps.link_prediction.main --dataset cora --family tnbbeta \
@@ -25,19 +28,21 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
 from tnbbeta_vae.data.planetoid import (
-    Graph,
     LinkSplit,
     load_planetoid,
     normalized_adjacency,
     split_edges,
 )
+from tnbbeta_vae.data.snap_community import Graph as SnapGraph
+from tnbbeta_vae.data.snap_community import load_snap_community
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import select_device
 
-_DEFAULT_EPOCHS = {"cora": 200, "citeseer": 200, "pubmed": 400}
+_DEFAULT_EPOCHS = {"cora": 200, "citeseer": 200, "pubmed": 400, "dblp": 50}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -62,7 +67,11 @@ def main(argv: list[str] | None = None) -> None:
 
     device = select_device(args.device)
     epochs = args.epochs or _DEFAULT_EPOCHS[args.dataset]
-    graph = load_planetoid(data_dir() / "planetoid", args.dataset)
+    # Load from Planetoid or SNAP community dataset.
+    if args.dataset == "dblp":
+        graph = load_snap_community(data_dir() / "snap_community", "dblp")
+    else:
+        graph = load_planetoid(data_dir() / "planetoid", args.dataset)
     splits = {seed: split_edges(graph.adjacency, seed=seed) for seed in args.seeds}
 
     summaries: list[dict[str, Any]] = []
@@ -112,7 +121,7 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def run_once(
-    graph: Graph,
+    graph: PlanetoidGraph | SnapGraph,
     split: LinkSplit,
     config: GraphVAEConfig,
     *,
@@ -139,8 +148,18 @@ def run_once(
     """
     torch.manual_seed(seed)
     upper = np.stack(np.nonzero(np.triu(split.train_adjacency.toarray(), k=1)))
+    # Convert features: if scipy.sparse (Planetoid), convert to dense torch.Tensor;
+    # if already torch.sparse (SNAP), keep as-is (GraphVAE handles sparse features).
+    if hasattr(graph.features, "tocoo"):
+        # scipy.sparse matrix (Planetoid): convert to dense for backward compatibility.
+        features_tensor = torch.as_tensor(graph.features.toarray(), dtype=torch.float32)
+    elif isinstance(graph.features, torch.Tensor):
+        # Already a torch tensor (torch.sparse or torch.dense).
+        features_tensor = graph.features.to(dtype=torch.float32)
+    else:
+        raise TypeError(f"Unsupported features type: {type(graph.features)}")
     batch = GraphBatch(
-        features=torch.as_tensor(graph.features.toarray(), dtype=torch.float32),
+        features=features_tensor,
         norm_adjacency=normalized_adjacency(split.train_adjacency),
         positive_edges=torch.as_tensor(upper, dtype=torch.long),
     ).to(device)

@@ -38,7 +38,10 @@ class GraphBatch:
     """A whole graph for full-batch training.
 
     Attributes:
-        features: Node features, shape ``(num_nodes, in_features)``.
+        features: Node features, shape ``(num_nodes, in_features)``. May be dense
+            (torch.Tensor) or sparse (torch.sparse.Tensor, typically COO format).
+            For sparse identity features on a featureless graph, use
+            torch.sparse_coo_tensor.
         norm_adjacency: Sparse ``D^-1/2 (A + I) D^-1/2`` of the training graph.
         positive_edges: Training edges, shape ``(2, num_edges)``, each undirected
             edge once.
@@ -145,11 +148,27 @@ class GraphVAE(nn.Module):
         self, batch: GraphBatch
     ) -> tuple[Distribution, Distribution]:
         """Returns the per-node posteriors and the prior."""
-        hidden = torch.relu(
-            torch.sparse.mm(
-                batch.norm_adjacency, self.first(self.dropout(batch.features))
+        if batch.features.is_sparse:
+            # For sparse features (typically identity matrices), apply the first layer
+            # via sparse matrix multiplication to avoid densifying. This is necessary
+            # for graphs with no real node features (e.g., com-DBLP: 317K would be
+            # 402GB dense), where the standard substitute is an identity matrix.
+            # torch.sparse.mm(A, B) computes A @ B^T, so we use self.first.weight.t()
+            # and get features @ W^T directly (mathematically identical to
+            # nn.Linear(features) but never densifies).
+            first_out = torch.sparse.mm(batch.features, self.first.weight.t())
+            # Dropout on sparse identity features is not well-defined: dropping a
+            # feature on an identity matrix zeros a whole node's row, which is a
+            # different operation than per-feature dropout semantics. Skip it entirely
+            # for sparse features, a conservative choice that preserves correctness.
+            hidden = torch.relu(torch.sparse.mm(batch.norm_adjacency, first_out))
+        else:
+            # Dense features: apply dropout and the first layer normally.
+            hidden = torch.relu(
+                torch.sparse.mm(
+                    batch.norm_adjacency, self.first(self.dropout(batch.features))
+                )
             )
-        )
         raw = torch.sparse.mm(batch.norm_adjacency, self.second(self.dropout(hidden)))
         return self._posterior(raw), self._prior(raw)
 
