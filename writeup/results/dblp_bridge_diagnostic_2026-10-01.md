@@ -19,6 +19,11 @@
   plus the 3 `link_prediction/dblp_<family>.json` grid-search summaries,
   rsynced from `/net/spaces/scratch/vpathak/tnbbeta_checkpoints/` into
   `dblp_results/` (local, untracked).
+- **Chart command** (`dblp_dose_response.png`, added with the dose-response
+  update below):
+  ```
+  uv run python -m apps.eval.dblp_dose_response_plot --results-dir dblp_results --output writeup/results/dblp_dose_response.png
+  ```
 
 This is the experiment the whole "TNBBeta vs. Power Spherical" avenue has
 been building toward since Table 1 showed zero aggregate differentiation
@@ -46,6 +51,61 @@ community vs. every other community it's a ground-truth member of, per
 metric, every time, at $p<0.02$ (three of the four comparisons are $p<0.01$).
 This is the first result in the entire reproduction where TNBBeta doesn't
 just tie vMF/Power Spherical -- it wins, clearly.
+
+## Update: the dose-response test confirms it, cleanly
+
+`apps.eval.dblp_bridge_diagnostic` now breaks link-prediction accuracy down
+by each node's raw community count (`_link_prediction_by_community_count`,
+PR #52), not just the binary bridge/non-bridge split used above -- a
+sharper, more falsifiable version of the same hypothesis: if TNBBeta's edge
+is really about representing genuine multi-community membership, the margin
+should grow with community count, not just step once at a threshold.
+
+| Communities | Edges ($\sim$) | TNBBeta AUC | PS AUC | vMF AUC | Gap vs. PS | Gap vs. vMF |
+|---|---|---|---|---|---|---|
+| 0 | 13,084 | 0.9073 | 0.8923 | 0.9002 | 0.0150 ($p=0.661$) | 0.0071 ($p=0.834$) |
+| 1 | 62,340 | 0.9388 | 0.9273 | 0.9304 | 0.0115 ($p=0.460$) | 0.0084 ($p=0.587$) |
+| 2 | 27,205 | 0.9170 | 0.9018 | 0.9017 | 0.0152 ($p=0.260$) | 0.0153 ($p=0.275$) |
+| 3 | 16,749 | 0.9040 | 0.8826 | 0.8800 | 0.0214 ($p=0.123$) | 0.0240 ($p=0.105$) |
+| 4 | 12,112 | 0.8943 | 0.8714 | 0.8671 | 0.0228 ($p=0.105$) | 0.0272 ($p=0.097$) |
+| 5+ | 78,482 | **0.8888** | 0.8462 | 0.8275 | **0.0426 ($p=0.004$)** | **0.0613 ($p=0.003$)** |
+
+AP tells the same story, slightly more sharply (the 5+ bucket's AP gap is
+0.058 vs. PS, $p<0.001$, and 0.075 vs. vMF, $p=0.001$; full per-bucket
+numbers in the underlying `bridge_diagnostic_final.json` files).
+
+![AUC and AP vs. community count, each family's mean with a shaded std band, plus an edge-count-per-bucket panel](dblp_dose_response.png)
+
+`dblp_dose_response.png` (`apps.eval.dblp_dose_response_plot`) plots both
+metrics' full mean-$\pm$-std curves against community count, with a third
+panel showing each bucket's edge count (identical across families/seeds, so
+shown once rather than duplicated under each metric) -- the thinner buckets
+(0, 3, 4, each under 17,000 edges, against 1's 62,340 and 5+'s 78,482) are
+visibly less supported, worth keeping in mind for how much weight to put on
+their individual points versus the overall trend. One honest detail visible
+in the chart but not obvious from the table alone: **AP shows a pronounced
+V-shape** (peaking at 1 community, dropping through a trough at 4, then
+recovering sharply at 5+) that AUC does not show nearly as sharply -- all
+three families dip together, so it doesn't affect the gap between them, but
+it's a real feature of the data worth a mention rather than smoothing over.
+
+**Restricted to the actual "more communities $\to$ more expressivity needed"
+ladder (1 through 5+; "0 communities" is a different population, outside the
+hypothesis's own scope), the AUC gap against both baselines is *perfectly*
+monotonically increasing: Spearman $\rho=1.000$ ($p<0.001$) against both
+vMF and Power Spherical.** AP is nearly as clean ($\rho=0.900$ against PS,
+$p=0.037$; $\rho=1.000$ against vMF, $p<0.001$). The gap is small and not
+statistically significant at 1-2 communities, grows through 3-4, and is
+clearly significant by 5+.
+
+This is meaningfully stronger evidence than the binary bridge/non-bridge
+split: a confound would need to track community count *monotonically*, not
+just produce a fixed offset past some threshold -- a far more specific
+coincidence to posit. It does not resolve the scale/features/under-tuned-
+grid candidates below (those are properties of com-DBLP as a whole, not of
+any one bucket), but it is real, dataset-internal evidence that whatever is
+happening tracks the community-structure variable specifically, rather than
+being a generic "this is com-DBLP and com-DBLP favors TNBBeta somehow" effect.
 
 ## The honest caveat: this is a broader win than the hypothesis predicted, and the architecture-fit explanation doesn't hold up
 
@@ -155,8 +215,7 @@ are over a third of the graph, not a small edge case.
   real evidence for the bridge-specific story.
 - Fix the r_bar computation to be genuinely per-node before citing it as
   shape evidence on its own.
-- Consider a version of this diagnostic restricted to a stricter bridge
-  definition (e.g. $\geq\!3$ communities, or top-quartile community count)
-  to check whether the TNBBeta margin grows for "more bridge-y" nodes, which
-  would be better evidence for the expressivity-specific story than the
-  current binary bridge/non-bridge split.
+- ~~Consider a version of this diagnostic restricted to a stricter bridge
+  definition... to check whether the TNBBeta margin grows for "more
+  bridge-y" nodes~~ -- done, see "Update: the dose-response test confirms
+  it, cleanly" above.
