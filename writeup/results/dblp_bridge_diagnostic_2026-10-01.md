@@ -202,6 +202,15 @@ original hypothesis -- that TNBBeta wins by reserving its bimodal capacity
 for bridge nodes specifically -- is not what's happening; this result rules
 it out directly rather than leaving it an open caveat.
 
+**This is the opposite regime from MNIST.** `posterior_trajectories_2026-10-01.md`'s
+real training trajectories show $\varepsilon$ converging to roughly 2-3x the
+unimodal threshold at every dimension tested there (never approaching
+$m<0$) -- com-DBLP's every-node $m<0$ is the mirror image, not a special
+case of the same behavior. Whatever decides which regime a dataset lands in
+looks like a property of the task (image classification vs. a featureless
+graph's link-prediction likelihood), not of per-node structure within one
+dataset -- see that write-up's addition for the numbers.
+
 **What actually differs, and significantly ($p\approx0.01$, 5/5 seeds in the
 same direction each time): $q$, $\varepsilon$ (equivalently $m$), and the
 corrected $r_{\text{bar}}$ -- not $p$** ($p=0.898$, no signal, consistent
