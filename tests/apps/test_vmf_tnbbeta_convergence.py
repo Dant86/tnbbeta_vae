@@ -6,6 +6,8 @@ import torch
 
 from apps.distributions.vmf_tnbbeta_convergence import (
     match_tnbbeta_to_vmf,
+    run_part1,
+    run_part2,
     vmf_mean_resultant_length,
 )
 
@@ -155,6 +157,71 @@ class TestMatchTnbbetaToVmf:
             )
             assert 0.5 < p < 1.0
 
+    def test_matches_high_kappa_targets(self) -> None:
+        """Regression test: very high vMF kappa (r_bar near 1) is reachable.
+
+        With the old ``p_max=0.9999`` default, ``r_bar`` topped out around
+        0.998 regardless of epsilon, so this target (vMF's r_bar at
+        kappa=1000, S^2) could not be matched within tolerance.
+        """
+        dim = 3
+        target_r_bar = vmf_mean_resultant_length(kappa=1000.0, dim=dim)
+
+        p = match_tnbbeta_to_vmf(
+            target_r_bar,
+            epsilon=1.0,
+            dim=dim,
+            sample_size=100000,
+            bisect_tol=1e-4,
+        )
+
+        from tnbbeta_vae.distributions.tnbbeta_spherical import TNBBetaSpherical
+
+        mu = torch.zeros(dim, dtype=torch.float64)
+        mu[0] = 1.0
+        dist = TNBBetaSpherical(mu, p=p, q=0.0, epsilon=1.0)
+        samples = dist.rsample((200000,))
+        achieved_r_bar = float(torch.norm(samples.mean(dim=0)).item())
+
+        assert abs(achieved_r_bar - target_r_bar) < 5e-3
+
+    def test_adjacent_high_kappa_targets_give_distinct_p(self) -> None:
+        """Regression test: close targets resolve to distinct matched p.
+
+        vMF's r_bar at kappa=500 vs. kappa=1000 (S^2) differ by only
+        0.001; the default ``bisect_tol`` must be tight enough that these
+        don't collapse onto the same matched ``p``.
+        """
+        dim = 3
+        r_500 = vmf_mean_resultant_length(kappa=500.0, dim=dim)
+        r_1000 = vmf_mean_resultant_length(kappa=1000.0, dim=dim)
+
+        p_500 = match_tnbbeta_to_vmf(r_500, epsilon=1.0, dim=dim, sample_size=100000)
+        p_1000 = match_tnbbeta_to_vmf(r_1000, epsilon=1.0, dim=dim, sample_size=100000)
+
+        assert p_500 < p_1000
+
+    def test_deterministic_given_fixed_seed(self) -> None:
+        """Same inputs (including seed) reproduce the same matched p.
+
+        The common-random-numbers trick (reseeding before every candidate
+        draw) is what makes the bisection a true monotonic root-find
+        rather than one perturbed by independent sampling noise at each
+        candidate; this also makes the whole call reproducible.
+        """
+
+        def _match() -> float:
+            return match_tnbbeta_to_vmf(
+                0.9,
+                epsilon=1.0,
+                dim=5,
+                sample_size=10000,
+                bisect_tol=1e-3,
+                seed=42,
+            )
+
+        assert _match() == _match()
+
 
 class TestConvergenceBehavior:
     """Integration tests for convergence properties."""
@@ -198,7 +265,7 @@ class TestConvergenceBehavior:
 
             tnbbeta_dist = TNBBetaSpherical(mu, p=p, q=0.0, epsilon=epsilon)
 
-            vmf_samples = vmf_dist.rsample(torch.Size([sample_size])).squeeze(0).numpy()
+            vmf_samples = vmf_dist.rsample(torch.Size([sample_size])).squeeze(1).numpy()
             tnbbeta_samples = tnbbeta_dist.rsample(torch.Size([sample_size])).numpy()
 
             w_vmf = _w_marginal_from_samples(vmf_samples, mu_np)
@@ -209,3 +276,67 @@ class TestConvergenceBehavior:
 
         # Gaps should generally decrease (allowing some noise)
         assert gaps[0] > gaps[-1] or abs(gaps[0] - gaps[-1]) < 0.01
+
+
+class TestRunPart1:
+    """Smoke tests for the Part 1 driver."""
+
+    def test_returns_one_result_per_kappa_epsilon_pair(self) -> None:
+        """run_part1 returns a ConvergenceResult for every grid point."""
+        dimensions = [3]
+        kappas = [10.0, 100.0]
+        epsilons = [1.0, 2.0]
+
+        results = run_part1(
+            dimensions=dimensions,
+            kappas=kappas,
+            epsilons=epsilons,
+            sample_size=5000,
+            bisect_tol=1e-2,
+        )
+
+        assert len(results) == len(dimensions) * len(kappas) * len(epsilons)
+        for result in results:
+            assert result.gap_energy >= 0
+            assert 0.0 <= result.gap_ks <= 1.0
+
+    def test_gap_energy_exceeds_noise_floor(self) -> None:
+        """The TNBBeta/vMF gap should be larger than the vMF/vMF noise floor."""
+        results = run_part1(
+            dimensions=[3],
+            kappas=[20.0],
+            epsilons=[1.0],
+            sample_size=20000,
+            bisect_tol=1e-3,
+        )
+
+        assert len(results) == 1
+        assert results[0].gap_energy > results[0].noise_floor_energy
+
+
+class TestRunPart2:
+    """Tests for the Part 2 checkpoint-availability check."""
+
+    def test_reports_missing_checkpoint_dir(self, tmp_path, monkeypatch) -> None:
+        """Returns a clear status, not fabricated numbers, when unavailable."""
+        missing_dir = tmp_path / "does_not_exist"
+        monkeypatch.setattr(
+            "apps.distributions.vmf_tnbbeta_convergence.checkpoint_dir",
+            lambda: missing_dir,
+        )
+
+        result = run_part2()
+
+        assert result["status"] == "checkpoint_dir_not_found"
+
+    def test_reports_no_matching_checkpoints(self, tmp_path, monkeypatch) -> None:
+        """Returns a clear status when the checkpoint dir has no sweep runs."""
+        (tmp_path / "unrelated_run").mkdir()
+        monkeypatch.setattr(
+            "apps.distributions.vmf_tnbbeta_convergence.checkpoint_dir",
+            lambda: tmp_path,
+        )
+
+        result = run_part2()
+
+        assert result["status"] == "no_checkpoints"

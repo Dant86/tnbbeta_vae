@@ -6,8 +6,8 @@ concentration. Uses two-sample tests (energy distance, KS test) on the w-margina
 
 Usage:
     uv run python -m apps.distributions.vmf_tnbbeta_convergence \\
-        [--output-csv PATH] [--output-report PATH] \\
-        [--sample-size 100000] [--bisect-tol 1e-3]
+        [--output-csv PATH] \\
+        [--sample-size 100000] [--bisect-tol 1e-4]
 
 Part 1: Synthetic two-sample test
     For a grid of vMF concentrations (kappa), match a TNBBeta(p, q=0, epsilon)
@@ -39,7 +39,13 @@ from tnbbeta_vae.distributions.tnbbeta_spherical import TNBBetaSpherical
 from tnbbeta_vae.distributions.von_mises_fisher import VonMisesFisher
 from tnbbeta_vae.paths import checkpoint_dir
 
-__all__ = ["main", "vmf_mean_resultant_length", "match_tnbbeta_to_vmf"]
+__all__ = [
+    "main",
+    "match_tnbbeta_to_vmf",
+    "run_part1",
+    "run_part2",
+    "vmf_mean_resultant_length",
+]
 
 
 @dataclass
@@ -77,11 +83,23 @@ def match_tnbbeta_to_vmf(
     dim: int,
     q: float = 0.0,
     sample_size: int = 100000,
-    bisect_tol: float = 1e-3,
+    bisect_tol: float = 1e-4,
     p_min: float = 0.5,
-    p_max: float = 0.9999,
+    p_max: float = 1.0 - 1e-7,
+    seed: int = 0,
 ) -> float:
     """Bisects to find TNBBeta p that matches target r_bar.
+
+    Each candidate ``p`` is evaluated on the *same* underlying random draw
+    (``seed`` reseeds the global RNG before every draw, restoring the prior
+    state afterwards), rather than a fresh one. ``r_bar`` as a function of
+    ``p`` is monotonically increasing for fixed underlying randomness
+    (``p`` only ever shifts the TNBbeta draw towards 1 -- see
+    :meth:`~tnbbeta_vae.distributions.tnbbeta_univariate.TNBBetaUnivariate.rsample`),
+    so this common-random-numbers trick makes the search a true monotonic
+    root-find instead of one perturbed by independent sampling noise at
+    each candidate, which could otherwise send the bisection the wrong way
+    when the true ``r_bar(p)`` gap is near the Monte Carlo noise floor.
 
     Args:
         target_r_bar: Target mean resultant length.
@@ -89,9 +107,22 @@ def match_tnbbeta_to_vmf(
         dim: Ambient dimension of the sphere.
         q: Concentration parameter (fixed, default 0).
         sample_size: Number of samples to draw for empirical r_bar.
-        bisect_tol: Convergence tolerance for bisection.
+        bisect_tol: Convergence tolerance for bisection. The default grid
+            in :func:`main` has adjacent targets as close as ``0.001``
+            apart (vMF ``r_bar`` at ``kappa=500`` vs. ``kappa=1000``, S^2),
+            so this must be well under that gap or adjacent kappas collapse
+            onto the same matched ``p`` -- harmless with fixed ``seed``
+            (no wrong-direction risk, see above), but uninformative.
         p_min: Lower bound for p search.
-        p_max: Upper bound for p search.
+        p_max: Upper bound for p search. Must stay under 1 (``p=1`` is a
+            degenerate point mass and divides by zero in the TNBbeta
+            sampling transform at ``u=0``), but close enough to 1 that
+            even very high vMF concentrations remain reachable -- at
+            ``p=0.9999`` (the previous default), ``r_bar`` tops out around
+            0.998 regardless of ``epsilon``, which is already below the
+            ``target_r_bar`` for vMF at ``kappa=1000``.
+        seed: Seed reused for every candidate ``p`` within one bisection
+            call, so they share the same underlying draw.
 
     Returns:
         Matched p value.
@@ -104,9 +135,14 @@ def match_tnbbeta_to_vmf(
     mu[0] = 1.0  # Unit vector along first axis
 
     def empirical_r_bar(p: float) -> float:
-        """Computes empirical r_bar by sampling."""
-        dist = TNBBetaSpherical(mu, p=p, q=q, epsilon=epsilon)
-        samples = dist.rsample((sample_size,))
+        """Computes empirical r_bar by sampling, reseeded for comparability."""
+        rng_state = torch.random.get_rng_state()
+        try:
+            torch.manual_seed(seed)
+            dist = TNBBetaSpherical(mu, p=p, q=q, epsilon=epsilon)
+            samples = dist.rsample((sample_size,))
+        finally:
+            torch.random.set_rng_state(rng_state)
         mean_sample = samples.mean(dim=0)
         return float(torch.norm(mean_sample).item())
 
@@ -137,44 +173,12 @@ def match_tnbbeta_to_vmf(
     return mid
 
 
-def _w_marginal_from_samples(samples: np.ndarray, mu: np.ndarray) -> np.ndarray:
-    """Extracts the w-marginal (cosine to mean direction) from sphere samples.
-
-    Args:
-        samples: Shape (N, dim), samples on S^(dim-1).
-        mu: Shape (dim,), unit-norm mean direction.
-
-    Returns:
-        Shape (N,), w values in [-1, 1].
-    """
-    result = samples @ mu
-    return result.ravel() if result.ndim > 1 else result
-
-
-def _compute_two_sample_stats(
-    samples1: np.ndarray, samples2: np.ndarray
-) -> tuple[float, float]:
-    """Computes energy distance and KS test on 1-D samples.
-
-    Args:
-        samples1: 1-D array of samples.
-        samples2: 1-D array of samples.
-
-    Returns:
-        (energy_distance, ks_statistic)
-    """
-    ed_val = energy_distance(samples1, samples2)
-    ks_result = ks_2samp(samples1, samples2)
-    ks_stat = ks_result[0]
-    return float(ed_val), float(ks_stat)  # pyright: ignore[reportArgumentType]
-
-
 def run_part1(
     dimensions: Sequence[int],
     kappas: Sequence[float],
     epsilons: Sequence[float],
     sample_size: int = 100000,
-    bisect_tol: float = 1e-3,
+    bisect_tol: float = 1e-4,
 ) -> list[ConvergenceResult]:
     """Runs Part 1: synthetic two-sample tests.
 
@@ -225,7 +229,7 @@ def run_part1(
                 tnbbeta_dist = TNBBetaSpherical(mu, p=matched_p, q=0.0, epsilon=epsilon)
 
                 vmf_samples = (
-                    vmf_dist.rsample(torch.Size([sample_size])).squeeze(0).numpy()
+                    vmf_dist.rsample(torch.Size([sample_size])).squeeze(1).numpy()
                 )
                 tnbbeta_samples = tnbbeta_dist.rsample(
                     torch.Size([sample_size])
@@ -241,7 +245,7 @@ def run_part1(
 
                 # Noise floor: two samples from same vMF
                 vmf_samples2 = (
-                    vmf_dist.rsample(torch.Size([sample_size])).squeeze(0).numpy()
+                    vmf_dist.rsample(torch.Size([sample_size])).squeeze(1).numpy()
                 )
                 w_vmf2 = _w_marginal_from_samples(vmf_samples2, mu_np)
                 noise_energy, noise_ks = _compute_two_sample_stats(w_vmf, w_vmf2)
@@ -318,9 +322,8 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-csv", type=str, default=None)
-    parser.add_argument("--output-report", type=str, default=None)
     parser.add_argument("--sample-size", type=int, default=100000)
-    parser.add_argument("--bisect-tol", type=float, default=1e-3)
+    parser.add_argument("--bisect-tol", type=float, default=1e-4)
     args = parser.parse_args(argv)
 
     # Part 1: Synthetic two-sample test
@@ -371,6 +374,37 @@ def main(argv: list[str] | None = None) -> None:
             f"{results[0].gap_energy:.2e} -> {results[-1].gap_energy:.2e}"
         )
     print(f"Part 2: {part2_result.get('status')}")
+
+
+def _w_marginal_from_samples(samples: np.ndarray, mu: np.ndarray) -> np.ndarray:
+    """Extracts the w-marginal (cosine to mean direction) from sphere samples.
+
+    Args:
+        samples: Shape (N, dim), samples on S^(dim-1).
+        mu: Shape (dim,), unit-norm mean direction.
+
+    Returns:
+        Shape (N,), w values in [-1, 1].
+    """
+    result = samples @ mu
+    return result.ravel() if result.ndim > 1 else result
+
+
+def _compute_two_sample_stats(
+    samples1: np.ndarray, samples2: np.ndarray
+) -> tuple[float, float]:
+    """Computes energy distance and KS test on 1-D samples.
+
+    Args:
+        samples1: 1-D array of samples.
+        samples2: 1-D array of samples.
+
+    Returns:
+        (energy_distance, ks_statistic)
+    """
+    ed_val = energy_distance(samples1, samples2)
+    ks_stat = ks_2samp(samples1, samples2).statistic  # pyright: ignore[reportAttributeAccessIssue]
+    return float(ed_val), float(ks_stat)
 
 
 if __name__ == "__main__":
