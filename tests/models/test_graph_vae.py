@@ -250,3 +250,60 @@ def test_a_run_that_diverges_immediately_reports_chance_level_metrics(
     assert result["val_auc"] == result["test_auc"] == 0.5
     summary = link_main.summarize([result, {**result, "diverged": 0.0}])
     assert summary["num_diverged"] == 1.0
+
+
+def _sparse_identity_batch(num_nodes: int, seed: int = 0) -> tuple[GraphBatch, Any]:
+    """Creates a small synthetic graph with sparse identity features."""
+    # Create a simple ring graph: node i connects to nodes (i-1) % n and (i+1) % n.
+    rows = np.repeat(np.arange(num_nodes), 2)
+    cols = np.concatenate(
+        [
+            (np.arange(num_nodes) - 1) % num_nodes,
+            (np.arange(num_nodes) + 1) % num_nodes,
+        ]
+    )
+    adjacency = sp.csr_matrix(
+        (np.ones_like(rows, dtype=np.float32), (rows, cols)),
+        shape=(num_nodes, num_nodes),
+    )
+    adjacency.eliminate_zeros()
+    # Sparse identity features (no real node features, just self-loops as placeholders).
+    features = torch.sparse_coo_tensor(
+        indices=torch.arange(num_nodes).unsqueeze(0).repeat(2, 1),
+        values=torch.ones(num_nodes, dtype=torch.float32),
+        size=(num_nodes, num_nodes),
+        dtype=torch.float32,
+    ).coalesce()
+    split = split_edges(adjacency, seed=seed)
+    upper = np.stack(np.nonzero(np.triu(split.train_adjacency.toarray(), k=1)))
+    batch = GraphBatch(
+        features=features,
+        norm_adjacency=normalized_adjacency(split.train_adjacency),
+        positive_edges=torch.as_tensor(upper, dtype=torch.long),
+    )
+    return batch, split
+
+
+@pytest.mark.parametrize("family", _FAMILIES)
+def test_sparse_identity_features_train_without_densifying(family: Any) -> None:
+    """Verifies sparse features work without densifying (no OOM on large graphs)."""
+    torch.manual_seed(0)
+    batch, _ = _sparse_identity_batch(num_nodes=100)
+    model = GraphVAE(
+        GraphVAEConfig(
+            family=family, in_features=100, hidden_dim=16, latent_dim=4, dropout=0.0
+        )
+    )
+
+    out = model.training_step(batch)
+    out["loss"].backward()
+
+    assert torch.isfinite(out["loss"])
+    assert torch.isfinite(out["link_loss"])
+    assert torch.isfinite(out["kl"])
+    assert all(p.grad is not None for p in model.first.parameters())
+    assert all(p.grad is not None for p in model.second.parameters())
+    embeddings = model.embeddings(batch)
+    assert embeddings.shape == (100, 4)
+    if family != "gaussian":
+        assert torch.allclose(embeddings.norm(dim=-1), torch.ones(100), atol=1e-4)

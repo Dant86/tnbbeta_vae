@@ -153,6 +153,8 @@ def _centre(posterior: Any, kind: str) -> torch.Tensor:
         return posterior.base_dist.loc
     if kind == "conv_vmf_vae":
         return posterior.loc
+    if kind == "conv_power_spherical_vae":
+        return posterior.mean_direction
     direction = posterior.mean_direction
     return torch.where((posterior.p > 0.5)[:, None], direction, -direction)
 
