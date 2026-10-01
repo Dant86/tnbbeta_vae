@@ -54,7 +54,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, choices=list(_DEFAULT_EPOCHS))
     parser.add_argument(
-        "--family", required=True, choices=["gaussian", "vmf", "tnbbeta"]
+        "--family",
+        required=True,
+        choices=["gaussian", "vmf", "tnbbeta", "power_spherical"],
     )
     parser.add_argument("--lrs", nargs="+", type=float, default=[0.01, 0.005, 0.001])
     parser.add_argument("--dropouts", nargs="+", type=float, default=[0.0, 0.2, 0.4])
@@ -63,10 +65,30 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--fixed-temperature", type=float, default=None)
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="If set, saves each seed's best-validation-epoch model as "
+        "$TNBBETA_CHECKPOINT_DIR/<run-name>_seed<seed>/final.pt, loadable by "
+        "apps.eval scripts (e.g. dblp_bridge_diagnostic.py --run-name "
+        "<run-name>_seed<seed>). With more than one (lr, dropout, latent_dim) "
+        "configuration, later configurations overwrite earlier ones' checkpoints "
+        "for the same seed -- intended for a single-configuration call.",
+    )
     args = parser.parse_args(argv)
 
     device = select_device(args.device)
     epochs = args.epochs or _DEFAULT_EPOCHS[args.dataset]
+    num_configs = len(args.lrs) * len(args.dropouts) * len(args.latent_dims)
+    if args.run_name is not None and num_configs > 1:
+        print(
+            f"Warning: --run-name with {num_configs} configurations -- each "
+            "seed's checkpoint will be overwritten by the last configuration "
+            "processed. Use a single (lr, dropout, latent-dim) per call if you "
+            "need every configuration's checkpoint.",
+            file=sys.stderr,
+        )
     # Load from Planetoid or SNAP community dataset.
     if args.dataset == "dblp":
         graph = load_snap_community(data_dir() / "snap_community", "dblp")
@@ -93,6 +115,7 @@ def main(argv: list[str] | None = None) -> None:
                 epochs=epochs,
                 seed=seed,
                 device=device,
+                run_name=args.run_name,
             )
             for seed in args.seeds
         ]
@@ -129,6 +152,7 @@ def run_once(
     epochs: int,
     seed: int,
     device: torch.device,
+    run_name: str | None = None,
 ) -> dict[str, float]:
     """Trains one model and returns the metrics at its best-validation epoch.
 
@@ -140,6 +164,12 @@ def run_once(
         epochs: Number of full-graph training steps.
         seed: Seed for the model initialization and negative sampling.
         device: Device to train on.
+        run_name: If given, saves the best-validation-epoch model's weights to
+            ``$TNBBETA_CHECKPOINT_DIR/<run_name>_seed<seed>/final.pt``, in the same
+            format :class:`~tnbbeta_vae.training.Trainer` writes (so
+            :func:`~tnbbeta_vae.training.load_model_checkpoint` and the ``apps.eval``
+            scripts can read it). Not saved if ``None`` (the default, preserving this
+            function's original metrics-only behavior).
 
     Returns:
         ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``, plus
@@ -174,6 +204,7 @@ def run_once(
         "best_epoch": -1.0,
     }
     best_val_auc = -1.0
+    best_state_dict: dict[str, torch.Tensor] | None = None
     diverged = 0.0
     for epoch in range(epochs):
         model.train()
@@ -203,7 +234,43 @@ def run_once(
                 "test_ap": test_ap,
                 "best_epoch": float(epoch),
             }
+            if run_name is not None:
+                best_state_dict = {
+                    key: value.detach().clone()
+                    for key, value in model.state_dict().items()
+                }
+
+    if run_name is not None and best_state_dict is not None:
+        _save_checkpoint(run_name, seed, config, best_state_dict)
+
     return {**best, "diverged": diverged}
+
+
+def _save_checkpoint(
+    run_name: str,
+    seed: int,
+    config: GraphVAEConfig,
+    state_dict: dict[str, torch.Tensor],
+) -> None:
+    """Writes a best-validation-epoch checkpoint in :class:`Trainer`'s format.
+
+    Args:
+        run_name: Base run name; the checkpoint is written under
+            ``<run_name>_seed<seed>``.
+        seed: This run's seed, appended to ``run_name`` for the directory.
+        config: The trained model's config.
+        state_dict: The model's weights at its best validation epoch.
+    """
+    run_dir = checkpoint_dir() / f"{run_name}_seed{seed}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "model_name": "graph_vae",
+            "config": config.model_dump(),
+            "model_state_dict": state_dict,
+        },
+        run_dir / "final.pt",
+    )
 
 
 def score_edges(
