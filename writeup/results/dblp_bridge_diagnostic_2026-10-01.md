@@ -24,6 +24,15 @@
   ```
   uv run python -m apps.eval.dblp_dose_response_plot --results-dir dblp_results --output writeup/results/dblp_dose_response.png
   ```
+- **Shape-diagnostic rerun** (master commit `7a41567`, merge of PR #54, "Fix
+  per-node r_bar and add real TNBBeta shape diagnostics to
+  dblp_bridge_diagnostic"): the diagnostic command above was rerun unchanged
+  against the same 15 checkpoints (no retraining -- `_posterior_stats`'s
+  output fields changed, not the model) to produce the corrected
+  "Shape diagnostic" numbers below, then summarized with:
+  ```
+  uv run python -m apps.eval.dblp_posterior_shape_summary --results-dir dblp_results
+  ```
 
 This is the experiment the whole "TNBBeta vs. Power Spherical" avenue has
 been building toward since Table 1 showed zero aggregate differentiation
@@ -157,38 +166,76 @@ investigating further, not yet a mechanistically understood one -- and
 specifically not evidence for "TNBBeta is just better at graphs," which the
 Planetoid tie directly contradicts.
 
-## Shape diagnostic: informative, but with a real measurement limitation
+## Shape diagnostic, corrected: a real difference, but not the one the hypothesis predicted
 
-| | TNBBeta | Power Spherical | vMF |
+The original version of this section used a buggy, cross-node `r_bar` (PR
+#54's fix: it averaged posterior sample means *across all selected nodes*
+before taking the norm, which measures how aligned a subset's mean
+directions are *with each other*, not each node's own posterior
+concentration) and never actually reported the `(p, q, epsilon)` marginals
+the module's own docstring had always promised. Both are fixed now
+(`apps.eval.dblp_bridge_diagnostic`'s `_posterior_stats`), and the diagnostic
+was rerun against the same 15 checkpoints. Mean $\pm$ std over 5 seeds,
+Welch's $t$-test bridge vs. non-bridge:
+
+| Statistic | Bridge | Non-bridge | $p$ |
 |---|---|---|---|
-| Bridge entropy | NaN (no closed form) | 1.3097 | 1.2291 |
-| Non-bridge entropy | NaN | 1.3097 | 1.2308 |
-| Bridge r_bar | 0.1460 $\pm$ 0.0115 | 0.0202 $\pm$ 0.0019 | 0.0337 $\pm$ 0.0101 |
-| Non-bridge r_bar | 0.0299 $\pm$ 0.0059 | 0.0168 $\pm$ 0.0017 | 0.0270 $\pm$ 0.0094 |
+| TNBBeta $r_{\text{bar}}$ (per-node, fixed) | 0.4721 $\pm$ 0.0367 | 0.3962 $\pm$ 0.0253 | 0.0111 |
+| TNBBeta $p$ | 0.3541 $\pm$ 0.2173 | 0.3730 $\pm$ 0.1853 | 0.8979 |
+| TNBBeta $q$ | 0.7089 $\pm$ 0.0154 | 0.6765 $\pm$ 0.0103 | 0.0101 |
+| TNBBeta $\varepsilon$ | 1.2208 $\pm$ 0.0536 | 1.1095 $\pm$ 0.0293 | 0.0101 |
+| TNBBeta $m = \varepsilon - \tfrac{d-1}{2}$ | $-6.2792 \pm 0.0536$ | $-6.3905 \pm 0.0293$ | 0.0101 |
+| TNBBeta frac. nodes with $m<0$ | 1.0000 $\pm$ 0.0000 | 1.0000 $\pm$ 0.0000 | n/a (zero variance) |
+| Power Spherical entropy | 1.3097 $\pm$ 0.0000 | 1.3097 $\pm$ 0.0000 | 0.9122 |
+| Power Spherical $r_{\text{bar}}$ (per-node) | 0.1076 $\pm$ 0.0000 | 0.1076 $\pm$ 0.0000 | 0.8263 |
+| vMF entropy | 1.2291 $\pm$ 0.0162 | 1.2308 $\pm$ 0.0130 | 0.8786 |
+| vMF $r_{\text{bar}}$ (per-node) | 0.1462 $\pm$ 0.0065 | 0.1456 $\pm$ 0.0053 | 0.8846 |
 
-Power Spherical's and vMF's entropy are **essentially identical** between
-bridge and non-bridge nodes (PS: 1.3097 vs. 1.3097 to 4 decimals; vMF: 1.2291
-vs. 1.2308) -- direct empirical confirmation of the proven theoretical fact
-(`tnbbeta_vs_power_spherical_expressivity.md`, Proposition 4.1 and the
-log-concavity argument) that both families are structurally incapable of
-using posterior shape to encode multi-community status, whatever the data
-looks like.
+**The headline correction: TNBBeta's bimodal capacity is not bridge-specific.**
+Every single node in the graph, bridge or not, has $m<0$ ($\varepsilon \approx
+1.1$–$1.2$ against a threshold of $\tfrac{d-1}{2}=7.5$ at $d{=}16$) -- the
+fraction is exactly 1.0 for both groups, every seed, with zero variance.
+TNBBeta's density is in the proven bimodal regime
+(`tnbbeta_vs_power_spherical_expressivity.md`, Theorem 5.1/Corollary 5.3)
+*everywhere*, not selectively switched on for multi-community nodes. The
+original hypothesis -- that TNBBeta wins by reserving its bimodal capacity
+for bridge nodes specifically -- is not what's happening; this result rules
+it out directly rather than leaving it an open caveat.
 
-TNBBeta's own entropy is NaN (no closed form, expected, not a bug), but its
-r_bar shows a much larger bridge/non-bridge gap (0.146 vs. 0.030, a
-$\sim$4.9x ratio) than either baseline (vMF: $\sim$1.2x; PS: $\sim$1.2x).
-**Caveat this needs before it's used as direct shape evidence:** as
-implemented, this r_bar averages posterior sample means *across all selected
-nodes* before taking the norm (`_posterior_stats`'s `mean_vector =
-subset_samples.mean(dim=(0, 1))`) -- it measures how aligned bridge nodes'
-mean directions are *with each other*, not each individual node's own
-posterior concentration. It's suggestive (TNBBeta's bridge/non-bridge
-populations are doing something aggregately different that vMF/PS's aren't),
-but it is not yet the clean "is this one node's posterior more spread out"
-measurement the shape hypothesis actually wants. Fixing it to compute
-per-node r_bar (norm the mean per node, then average the norms, rather than
-averaging vectors across nodes first) and re-running is a natural follow-up
-before leaning on this half of the result too heavily.
+**What actually differs, and significantly ($p\approx0.01$, 5/5 seeds in the
+same direction each time): $q$, $\varepsilon$ (equivalently $m$), and the
+corrected $r_{\text{bar}}$ -- not $p$** ($p=0.898$, no signal, consistent
+with this project's established MNIST finding that $p$ saturates and carries
+little class information by construction). Bridge nodes have higher $q$,
+higher $\varepsilon$ (closer to the $m=0$ boundary, i.e. a less extreme
+double-spike), and higher $r_{\text{bar}}$ (less antipodal cancellation in
+the raw sample mean) than non-bridge nodes, which sit further into $m<0$
+with a correspondingly more balanced, more cancelling two-pole shape. Put
+plainly: both groups are bimodal, but non-bridge nodes' bimodality is
+sharper and more symmetric between the two poles, while bridge nodes' is
+softer and more one-pole-dominant -- the opposite of the naive "bridge nodes
+need two balanced modes to represent two communities" story. This is a real,
+reproducible, mechanism-level difference (not just an aggregate score gap),
+but it is a different and more specific finding than the one the hypothesis
+predicted, and no claim stronger than what's in this paragraph is supported
+yet -- in particular, *why* training pushes $q$ and $\varepsilon$ in this
+direction for bridge nodes is not derived here, only observed.
+
+**vMF and Power Spherical show no bridge/non-bridge difference at all**
+($p \in [0.78, 0.91]$ on every statistic) -- direct empirical confirmation of
+the proven structural fact (`tnbbeta_vs_power_spherical_expressivity.md`,
+Proposition 4.1 and the log-concavity argument) that both families are
+incapable of using posterior shape to encode multi-community status.
+**Power Spherical's collapse is more extreme than that comparison alone
+suggests**: its entropy and $r_{\text{bar}}$ are identical to 4 decimals
+across bridge and non-bridge *and* across all 5 independently trained seeds
+(seed-level inspection confirms this isn't a rounding coincidence -- values
+agree to the 4th significant digit node-group-to-node-group within a seed).
+Its learned concentration isn't just blind to community structure; it's
+barely distinguishing any node from any other across the entire 317,080-node
+graph. vMF, by contrast, shows real seed-to-seed variation (entropy
+std $\approx0.013$–$0.016$) without the bridge/non-bridge split explaining
+any of it.
 
 ## One scale correction worth carrying forward
 
@@ -213,8 +260,15 @@ are over a third of the graph, not a small edge case.
   toward the Planetoid tie, scale (or the identity-features learning
   problem) is doing more work than community structure; if it holds, that's
   real evidence for the bridge-specific story.
-- Fix the r_bar computation to be genuinely per-node before citing it as
-  shape evidence on its own.
+- ~~Fix the r_bar computation to be genuinely per-node before citing it as
+  shape evidence on its own~~ -- done (PR #54), see "Shape diagnostic,
+  corrected" above. The real result is more specific than hoped: TNBBeta's
+  bimodal capacity is used by every node, not selectively by bridge nodes;
+  what actually differs significantly is $q$ and $\varepsilon$ within that
+  shared bimodal regime, not $p$ or whether the regime is entered at all.
+  *Why* training pushes those two parameters apart for bridge vs. non-bridge
+  nodes is still open -- a natural next step for whoever picks up the
+  theory side of this avenue.
 - ~~Consider a version of this diagnostic restricted to a stricter bridge
   definition... to check whether the TNBBeta margin grows for "more
   bridge-y" nodes~~ -- done, see "Update: the dose-response test confirms
