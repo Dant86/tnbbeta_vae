@@ -11,6 +11,7 @@ import torch
 
 from apps.eval.dblp_bridge_diagnostic import (
     _link_prediction_by_bridge_edges,
+    _link_prediction_by_community_count,
     _posterior_stats,
 )
 from tnbbeta_vae.distributions import (
@@ -91,6 +92,58 @@ def test_link_prediction_by_bridge_edges_reports_nan_for_an_empty_category() -> 
     assert math.isnan(metrics["primary"]["ap"])
     assert metrics["primary"]["count"] == 0
     assert metrics["secondary"]["count"] == 0
+
+
+def test_link_prediction_by_community_count_buckets_by_endpoint_count() -> None:
+    """Each test edge contributes to each endpoint's own community-count bucket."""
+    # Node 0: 1 community. Node 1: 2 communities. Node 2: 0 (absent from `communities`).
+    communities = {0: {0}, 1: {0, 1}}
+    embeddings = torch.tensor([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0]])
+    split = SimpleNamespace(
+        test_positive=np.array([[0], [1]]),  # edge (0, 1): bucket "1" and bucket "2"
+        test_negative=np.array([[0], [2]]),
+    )
+
+    metrics = _link_prediction_by_community_count(embeddings, split, communities)
+
+    assert metrics["1"]["count"] == 1
+    assert metrics["2"]["count"] == 1
+    assert metrics["0"]["count"] == 0  # node 2 has no test-positive edges
+    assert metrics["3"]["count"] == 0
+
+
+def test_link_prediction_by_community_count_pools_the_tail_into_max_count_plus() -> (
+    None
+):
+    """Counts at or above max_count are pooled into one "<max_count>+" bucket."""
+    communities = {0: {0, 1, 2}, 1: {0, 1, 2, 3, 4}}  # counts 3 and 5
+    embeddings = torch.tensor([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0]])
+    split = SimpleNamespace(
+        test_positive=np.array([[0], [1]]),
+        test_negative=np.array([[0], [2]]),
+    )
+
+    metrics = _link_prediction_by_community_count(
+        embeddings, split, communities, max_count=3
+    )
+
+    assert set(metrics) == {"0", "1", "2", "3+"}
+    assert metrics["3+"]["count"] == 2  # both endpoints (counts 3 and 5) land here
+
+
+def test_link_prediction_by_community_count_reports_nan_for_an_empty_bucket() -> None:
+    """A bucket with no qualifying test edges reports nan rather than crashing."""
+    embeddings = torch.tensor([[1.0, 0.0], [0.0, 1.0]])
+    split = SimpleNamespace(
+        test_positive=np.empty((2, 0), dtype=np.int64),
+        test_negative=np.array([[0], [1]]),
+    )
+
+    metrics = _link_prediction_by_community_count(embeddings, split, {})
+
+    assert math.isnan(metrics["0"]["auc"])
+    assert math.isnan(metrics["0"]["ap"])
+    assert metrics["0"]["count"] == 0
 
 
 def _normalized(vectors: torch.Tensor) -> torch.Tensor:

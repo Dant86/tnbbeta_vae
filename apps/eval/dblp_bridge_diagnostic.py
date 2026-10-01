@@ -20,6 +20,12 @@ for these bridge nodes. We test two hypotheses:
    to its *secondary* communities (non-primary) improves for TNBBeta compared to
    baselines, while aggregate AUC/AP stay tied (same pattern as other datasets).
 
+3. **Dose-response hypothesis**: if (2) is really about representing genuine multi-
+   community membership rather than some other difference between the families, the
+   TNBBeta-vs-baseline AUC/AP gap should grow with a node's community count (1, 2, 3,
+   ...), not just step once at the bridge/non-bridge threshold -- a sharper, more
+   falsifiable version of (2) (``_link_prediction_by_community_count``).
+
 **Design decisions:**
 
 - **Primary vs. secondary community**: For each bridge node, ``snap_community.py``'s
@@ -54,6 +60,7 @@ accuracy broken down by edge type.
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import json
 import sys
 from typing import TYPE_CHECKING, Any
@@ -151,6 +158,9 @@ def main(argv: list[str] | None = None) -> None:
     link_metrics = _link_prediction_by_bridge_edges(
         embeddings, split, bridge_communities, remapped_communities
     )
+    link_metrics_by_count = _link_prediction_by_community_count(
+        embeddings, split, remapped_communities
+    )
 
     results: dict[str, Any] = {
         "run_name": args.run_name,
@@ -165,6 +175,7 @@ def main(argv: list[str] | None = None) -> None:
             "posterior_stats": non_bridge_stats,
         },
         "link_prediction_metrics": link_metrics,
+        "link_prediction_by_community_count": link_metrics_by_count,
     }
 
     output = run_dir / f"bridge_diagnostic_{args.checkpoint}.json"
@@ -290,6 +301,74 @@ def _link_prediction_by_bridge_edges(
         pos_edges = np.array(edges).T
         pos_scores = (values[pos_edges[0]] * values[pos_edges[1]]).sum(-1)
         metrics[edge_type] = {
+            "auc": float(roc_auc(pos_scores, neg_scores)),
+            "ap": float(average_precision(pos_scores, neg_scores)),
+            "count": len(pos_scores),
+        }
+    return metrics
+
+
+def _link_prediction_by_community_count(
+    embeddings: torch.Tensor,
+    split: Any,
+    communities: dict[int, set[int]],
+    max_count: int = 5,
+) -> dict[str, Any]:
+    """Computes link-prediction metrics broken down by a node's community count.
+
+    A more direct test of the expressivity hypothesis than the binary bridge/non-
+    bridge split in :func:`_link_prediction_by_bridge_edges`: if TNBBeta's edge is
+    really about representing genuine multi-community membership, the TNBBeta-vs-
+    baseline gap should grow with community count (a dose-response pattern), not just
+    step once at some threshold.
+
+    For each test edge, each endpoint contributes an instance to its own community-
+    count bucket -- so, as in :func:`_link_prediction_by_bridge_edges`, an edge between
+    two nodes with different counts contributes to both buckets, once per endpoint's
+    perspective. A node absent from ``communities`` has zero recorded communities.
+    Counts at or above ``max_count`` are pooled into one ``"<max_count>+"`` bucket,
+    since community count is expected to be long-tailed and a per-exact-count
+    breakdown would get noisy fast at the tail; every bucket's edge count is reported
+    alongside its AUC/AP for exactly this reason -- a thin bucket should be visibly
+    thin, not silently misleading.
+
+    Args:
+        embeddings: Node embeddings, shape (num_nodes, latent_dim).
+        split: LinkSplit with val and test edges.
+        communities: Remapped node ID -> set of community indices, covering every node
+            (bridge or not) that belongs to at least one community.
+        max_count: Community counts at or above this are pooled into one bucket.
+
+    Returns:
+        Dict keyed by bucket label (``"0"``, ``"1"``, ..., ``"<max_count>+"``), each
+        with AUC/AP/count.
+    """
+
+    def bucket(node: int) -> str:
+        count = len(communities.get(node, set()))
+        return f"{max_count}+" if count >= max_count else str(count)
+
+    edges_by_bucket: dict[str, list[tuple[int, int]]] = defaultdict(list)
+    for raw_u, raw_v in split.test_positive.T:
+        u, v = int(raw_u), int(raw_v)
+        for node in (u, v):
+            edges_by_bucket[bucket(node)].append((u, v))
+
+    values = embeddings.numpy()
+    neg_scores = (values[split.test_negative[0]] * values[split.test_negative[1]]).sum(
+        -1
+    )
+
+    labels = [str(count) for count in range(max_count)] + [f"{max_count}+"]
+    metrics: dict[str, Any] = {}
+    for label in labels:
+        edges = edges_by_bucket.get(label, [])
+        if not edges:
+            metrics[label] = {"auc": float("nan"), "ap": float("nan"), "count": 0}
+            continue
+        pos_edges = np.array(edges).T
+        pos_scores = (values[pos_edges[0]] * values[pos_edges[1]]).sum(-1)
+        metrics[label] = {
             "auc": float(roc_auc(pos_scores, neg_scores)),
             "ap": float(average_precision(pos_scores, neg_scores)),
             "count": len(pos_scores),
