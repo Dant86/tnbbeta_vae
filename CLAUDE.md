@@ -104,6 +104,18 @@ automatically on commit, excluding `notebooks/`.
   README); they call `apps/train`, `apps/eval` and `apps/data`.
 - `apps/` holds CLI scripts (not part of the installed package); library
   code belongs in `src/tnbbeta_vae/`.
+- `writeup/results/`: dated per-experiment write-ups,
+  `<descriptive_topic>_<YYYY-MM-DD>.md`. Unlike the other `writeup/`
+  subdirectories, these ARE committed to git, not gitignored and not local
+  scratch -- the project wants a transparent, permanent chain of every
+  experiment's results, not just the ones that made it into a weekly
+  summary. Every result that gets generated belongs here (not left in a
+  stray location, not only pasted into chat), and every one must record,
+  near the top: the date, the exact command(s) used to produce the result
+  (training and/or table/eval command), and the `master` commit the code was
+  run against (or the relevant feature-branch commit/PR if `master` didn't
+  yet have the code) -- a result without its code version attached can't be
+  reproduced or correctly attributed later.
 - `notebooks/` is excluded from ruff/pyright/pre-commit -- don't hold it
   to the same style standard as `src/`.
 - Private (underscore-prefixed) helper functions/methods go after the
