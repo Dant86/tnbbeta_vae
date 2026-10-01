@@ -47,19 +47,55 @@ metric, every time, at $p<0.02$ (three of the four comparisons are $p<0.01$).
 This is the first result in the entire reproduction where TNBBeta doesn't
 just tie vMF/Power Spherical -- it wins, clearly.
 
-## The honest caveat: this is a broader win than the hypothesis predicted
+## The honest caveat: this is a broader win than the hypothesis predicted, and the architecture-fit explanation doesn't hold up
 
 The bridge-node hypothesis was specifically that TNBBeta should win on the
 *hard*, secondary-community edges while tying on the primary/aggregate case
 (the same pattern as every other dataset this week). **TNBBeta also wins
-clearly on primary edges**, which was supposed to be the control. That means
-this result does not cleanly isolate "expressivity helps specifically with
-multi-community ambiguity" -- it's at least partly, maybe mostly, a more
-general finding that TNBBeta's posterior family fits this graph/GCN
-architecture better overall, for reasons this experiment alone can't
-separate from the bridge-specific story. Worth being precise about this
-distinction rather than overselling it as a clean confirmation of the
-original, narrower hypothesis.
+clearly on primary edges**, which was supposed to be the control.
+
+**Checked, and ruled out: this is not "TNBBeta just fits the GCN link-
+prediction architecture better in general."** `link_prediction_table4_full_2026-09-23.md`
+ran the *exact same* `GraphVAE`/GCN architecture on the same task
+(link prediction) on Cora/Citeseer/Pubmed, and found TNBBeta and vMF
+**statistically indistinguishable on every dataset and metric there** --
+nominal gaps of 0.2-0.7 points, well within their combined standard
+deviations, sometimes with TNBBeta nominally *behind*. If the com-DBLP win
+were a generic "this architecture suits TNBBeta" effect, it should have
+shown up on Planetoid too, and it plainly doesn't. Whatever is driving the
+com-DBLP result is something that differs between com-DBLP and Planetoid
+specifically, not a property of the architecture alone.
+
+That still leaves several real candidates this one experiment can't
+distinguish between, and none should be assumed without a dedicated check:
+
+- **The overlapping-community/bridge structure itself** (the original
+  hypothesis) -- present and large (35% of nodes) in com-DBLP, essentially
+  absent from Planetoid's single-label class structure.
+- **Scale** -- com-DBLP (317,080 nodes) is 16-100x larger than
+  Cora/Citeseer/Pubmed (2,708-19,717 nodes). A scale effect unrelated to
+  community structure can't be ruled out.
+- **Features** -- Planetoid nodes have real bag-of-words content features;
+  com-DBLP nodes have none (sparse identity only, per `snap_community.py`),
+  so the encoder has to learn everything from pure graph structure, a
+  meaningfully different learning problem (closer to a transductive
+  node-embedding method than a content-based GCN).
+- **An under-tuned comparison, a genuine methodological gap in this run
+  specifically:** the Planetoid Table 4 result came from a 27-point grid
+  search per family (3 learning rates x 3 dropouts x 3 latent dims). This
+  com-DBLP run, per the week 2 plan's deliberate scope-control decision,
+  only tried 2 configurations per family (1 learning rate, 2 dropout
+  settings, 1 latent dim). If vMF or Power Spherical's true best
+  configuration on com-DBLP sits outside that narrow grid while TNBBeta
+  happens to be more robust to the choice, part or all of this margin could
+  be an artifact of unequal tuning effort rather than a real capability
+  difference. Worth running a wider grid for all three families before
+  treating the magnitude of this win as settled.
+
+The right framing for now: a real, significant, reproducible effect worth
+investigating further, not yet a mechanistically understood one -- and
+specifically not evidence for "TNBBeta is just better at graphs," which the
+Planetoid tie directly contradicts.
 
 ## Shape diagnostic: informative, but with a real measurement limitation
 
@@ -106,6 +142,17 @@ are over a third of the graph, not a small edge case.
 
 ## Next steps
 
+- **Run a wider hyperparameter grid for all three families on com-DBLP**,
+  closer in spirit to Planetoid's 27-point search, before trusting the
+  magnitude of this win -- the single biggest methodological gap identified
+  above.
+- **Separate scale from community structure**: run the same diagnostic on a
+  Planetoid-scale subgraph of com-DBLP (e.g. an induced subgraph on a
+  handful of communities) with the overlapping structure preserved, to check
+  whether the win survives at a comparable node count -- if it shrinks
+  toward the Planetoid tie, scale (or the identity-features learning
+  problem) is doing more work than community structure; if it holds, that's
+  real evidence for the bridge-specific story.
 - Fix the r_bar computation to be genuinely per-node before citing it as
   shape evidence on its own.
 - Consider a version of this diagnostic restricted to a stricter bridge
@@ -113,8 +160,3 @@ are over a third of the graph, not a small edge case.
   to check whether the TNBBeta margin grows for "more bridge-y" nodes, which
   would be better evidence for the expressivity-specific story than the
   current binary bridge/non-bridge split.
-- The primary-edges win needs its own explanation independent of the
-  bridge-node story -- worth a closer look at what's different about this
-  task/architecture (full-batch GCN on a real citation-adjacent graph)
-  versus MNIST that lets TNBBeta's extra parameters actually earn their
-  keep here.
