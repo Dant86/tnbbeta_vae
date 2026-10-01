@@ -122,7 +122,11 @@ def load_snap_community(root: Path, name: str) -> Graph:
     indices = torch.arange(num_nodes, dtype=torch.long).unsqueeze(0).repeat(2, 1)
     values = torch.ones(num_nodes, dtype=torch.float32)
     features = torch.sparse_coo_tensor(
-        indices, values, (num_nodes, num_nodes), dtype=torch.float32
+        indices,
+        values,
+        (num_nodes, num_nodes),
+        dtype=torch.float32,
+        check_invariants=False,
     ).coalesce()
 
     return Graph(adjacency, features, node_id_map)
