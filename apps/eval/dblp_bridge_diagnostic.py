@@ -182,9 +182,16 @@ def _posterior_stats(
     Returns:
         Dict with entropy and family-specific concentration measures.
     """
-    # Entropy (per-node).
+    # Entropy (per-node). posterior already has batch_shape == (num_nodes,) with the
+    # whole latent vector as a single event (not num_nodes independent per-dimension
+    # events), so wrapping in Independent(posterior, 1) -- as a previous version of
+    # this function did -- reinterprets that batch dimension into the event instead,
+    # collapsing entropy() to a 0-d scalar and crashing on entropy[mask] ("too many
+    # indices for tensor of dimension 0"). TNBBetaSpherical has no closed-form entropy
+    # (NotImplementedError, caught below) and masked this for TNBBeta; vMF and Power
+    # Spherical both implement entropy() and hit it directly.
     try:
-        entropy = torch.distributions.Independent(posterior, 1).entropy()  # type: ignore
+        entropy = posterior.entropy()  # type: ignore[union-attr]
         entropy = entropy[mask].mean().item()
     except (NotImplementedError, AttributeError):
         entropy = float("nan")
@@ -194,8 +201,14 @@ def _posterior_stats(
     r_bar = float("nan")
     try:
         with torch.no_grad():
-            # Sample from posterior to estimate mean concentration.
-            samples = posterior.rsample((100,))  # type: ignore
+            # torch.Size, not a plain tuple: VonMisesFisher.rsample (a stable,
+            # restored baseline -- see CLAUDE.md -- not touched here) only accepts
+            # torch.Size or a bare int, and silently does the wrong thing with any
+            # other iterable (wraps the whole tuple as one non-int "size", raising
+            # TypeError at torch.Size construction). TNBBetaSpherical/PowerSpherical
+            # accept a plain tuple too, so torch.Size works uniformly across all
+            # three families.
+            samples = posterior.rsample(torch.Size([100]))  # type: ignore
             if len(samples.shape) > 2:
                 # samples shape: (n_samples, batch, latent_dim)
                 subset_samples = samples[:, mask, :]
