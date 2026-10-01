@@ -8,7 +8,7 @@
 # p, the fairer comparison to vMF's kappa once training saturates p; a no-op elsewhere), and,
 # for TNBBeta only, latitude_final.json/.html (the p/q "cap vs ring" diagnostic).
 # Edit the grid below; keep --array's upper bound at (product of sizes) - 1.
-#   7 models x 6 latent dims x 5 seeds = 210 tasks -> 0-209
+#   8 models x 6 latent dims x 5 seeds = 240 tasks -> 0-239
 #
 # CONVENTION. The S-VAE paper's "d" is the dimension of the latent MANIFOLD: its d=2 S-VAE is
 # S^2 in R^3 (Figure 2 shows a Hammer projection of S^2; the reference code trains the vMF model
@@ -17,18 +17,21 @@
 # (ambient d + 1); the first four give the sphere ambient dimension d (S^(d-1), one degree of
 # freedom fewer than the Gaussian at the same d), which is how the first sweep was run.
 #
-#   index  name   model            ambient dim   vMF initial kappa
-#   0      gauss  Gaussian         d             -
-#   1      vmf    vMF (reference)  d             ~1.7 (collapses at d=40)
-#   2      tnb    TNBBeta          d             -
-#   3      vmfk   vMF              d             d
-#   4      vmfs   vMF (reference)  d + 1         ~1.7 (collapses at d=40)
-#   5      tnbs   TNBBeta          d + 1         -
-#   6      vmfks  vMF              d + 1         d + 1
+#   index  name   model                ambient dim   vMF initial kappa
+#   0      gauss  Gaussian             d             -
+#   1      vmf    vMF (reference)      d             ~1.7 (collapses at d=40)
+#   2      tnb    TNBBeta              d             -
+#   3      vmfk   vMF                  d             d
+#   4      vmfs   vMF (reference)      d + 1         ~1.7 (collapses at d=40)
+#   5      tnbs   TNBBeta              d + 1         -
+#   6      vmfks  vMF                  d + 1         d + 1
+#   7      pss    Power Spherical      d + 1         - (kappa=0 init is meaningful, not
+#                                                        a collapse risk like vMF's)
 #
-# Task index = (model * 6 + dim index) * 5 + seed; d=128 is dim index 5 (vMF underflows there),
+# Task index = (model * 6 + dim index) * 5 + seed; d=128 is dim index 5 (vMF underflows there,
+# and there's no reference Table 1 entry to compare Power Spherical against at d=128 either),
 # so skip it, e.g. the paper-convention sphere models without d=128 are
-# "--array=120-144,150-174,180-204" (vmfs, tnbs, vmfks).
+# "--array=120-144,150-174,180-204,210-234" (vmfs, tnbs, vmfks, pss).
 # Submit from the repo root:  sbatch scripts/slurm/mnist_sweep.sbatch
 # MNIST must already be downloaded (apps.data.download_mnist). Safe to resubmit: the
 # training step resumes, and finished runs are skipped. A task that lands on a node with
@@ -43,7 +46,7 @@
 #SBATCH --mem=16G
 #SBATCH --time=08:00:00
 #SBATCH --requeue
-#SBATCH --array=0-209%12
+#SBATCH --array=0-239%12
 #SBATCH --output=slurm_logs/%x_%A_%a.out
 #SBATCH --error=slurm_logs/%x_%A_%a.err
 
@@ -52,10 +55,10 @@ cd "${SLURM_SUBMIT_DIR}"
 source "${SLURM_SUBMIT_DIR}/scripts/slurm/no_gpu_retry.sh"
 
 MODELS=(conv_gaussian_vae conv_vmf_vae conv_tnbbeta_spherical_vae conv_vmf_vae
-        conv_vmf_vae conv_tnbbeta_spherical_vae conv_vmf_vae)
-SHORT_NAMES=(gauss vmf tnb vmfk vmfs tnbs vmfks)
-AMBIENT_OFFSET=(0 0 0 0 1 1 1)
-INIT_KAPPA_FROM_AMBIENT=(0 0 0 1 0 0 1)
+        conv_vmf_vae conv_tnbbeta_spherical_vae conv_vmf_vae conv_power_spherical_vae)
+SHORT_NAMES=(gauss vmf tnb vmfk vmfs tnbs vmfks pss)
+AMBIENT_OFFSET=(0 0 0 0 1 1 1 1)
+INIT_KAPPA_FROM_AMBIENT=(0 0 0 1 0 0 1 0)
 LATENT_DIMS=(2 5 10 20 40 128)
 SEEDS=(0 1 2 3 4)
 HIDDEN_CHANNELS=32

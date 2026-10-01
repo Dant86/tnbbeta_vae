@@ -1,4 +1,4 @@
-"""A variational graph auto-encoder with a Gaussian, vMF or TNBBeta latent.
+"""A variational graph auto-encoder with a selectable latent family.
 
 Follows Kipf and Welling's VGAE as used in the S-VAE paper's link-prediction
 experiment: a two-layer GCN encoder gives one posterior per node, and a link's
@@ -69,8 +69,8 @@ class GraphVAEConfig(BaseModel):
     """Hyperparameters for :class:`GraphVAE`.
 
     Attributes:
-        family: ``"gaussian"`` (N(0, I) prior), ``"vmf"`` or ``"tnbbeta"`` (uniform
-            sphere prior).
+        family: ``"gaussian"`` (N(0, I) prior), or ``"vmf"``, ``"power_spherical"``
+            or ``"tnbbeta"`` (all uniform-sphere prior).
         in_features: Number of node features.
         hidden_dim: Width of the first GCN layer.
         latent_dim: Latent dimension.

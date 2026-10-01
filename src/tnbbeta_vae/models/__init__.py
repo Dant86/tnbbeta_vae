@@ -7,6 +7,10 @@ model module's ``@register_model`` decorator runs on import), so
 """
 
 from tnbbeta_vae.models.conv_gaussian_vae import ConvGaussianVAE, ConvGaussianVAEConfig
+from tnbbeta_vae.models.conv_power_spherical_vae import (
+    ConvPowerSphericalVAE,
+    ConvPowerSphericalVAEConfig,
+)
 from tnbbeta_vae.models.conv_vae import (
     ConvTNBBetaSphericalVAE,
     ConvTNBBetaSphericalVAEConfig,
@@ -23,6 +27,8 @@ from tnbbeta_vae.models.semi_supervised import M1M2VAE, M1M2Config, SemiBatch
 __all__ = [
     "ConvGaussianVAE",
     "ConvGaussianVAEConfig",
+    "ConvPowerSphericalVAE",
+    "ConvPowerSphericalVAEConfig",
     "ConvTNBBetaSphericalVAE",
     "ConvTNBBetaSphericalVAEConfig",
     "ConvVonMisesFisherVAE",
