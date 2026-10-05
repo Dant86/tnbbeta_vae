@@ -1,1 +1,110 @@
-TBD -- results, figures and findings from this week.
+First, let's discuss convergence.
+
+\begin{theorem}[Modality of SphericalTNBBeta]
+\label{thm:modality}
+Fix $\boldsymbol{\mu} \in \mathbb{S}^{d - 1}$. For any $p \in (0, 1)$ and $q \in [0, 1)$:
+\begin{itemize}
+    \item if $\varepsilon > (d - 1)/2$, $\mathrm{SphericalTNBBeta}(\boldsymbol{\mu}, p, q, \varepsilon)$
+    is unimodal;
+    \item if $\varepsilon < (d - 1)/2$, $\mathrm{SphericalTNBBeta}(\boldsymbol{\mu}, p, q, \varepsilon)$
+    admits two modes at $\boldsymbol{\mu}$ and $-\boldsymbol{\mu}$, and may admit a third interior mode
+    depending on the concentration parameter $q$.
+\end{itemize}
+\end{theorem}
+
+\begin{theorem}[Convergence of SphericalTNBBeta]
+\label{thm:convergence}
+Fix $\boldsymbol{\mu} \in \mathbb{S}^{d - 1}$, $q \in [0, 1)$, and $\varepsilon > (d - 1)/2$. As
+$p \to 1$, $\mathrm{SphericalTNBBeta}(\boldsymbol{\mu}, p, q, \varepsilon)$ converges to
+$\delta_{\boldsymbol{\mu}}$, and mass is concentrated within $O(1 - p)$ of $\boldsymbol{\mu}$.
+\end{theorem}
+
+The vMF distribution always has a cap-shape, and trivially converges to a dirac mass about
+$\boldsymbol{\mu}$ as $\kappa \to \infty$.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{assets/tnbbeta_posterior_trajectories.png}
+    \caption{Posterior trajectories for the SphericalTNBBeta-VAE}
+    \label{fig:trajectories}
+\end{figure}
+\Cref{fig:trajectories} illustrates that the limit in \Cref{thm:convergence} is actually met in
+practice, validating the coarse "cap-like" shape argument made in week 1.
+
+I additionally extended the MNIST evaluation table from week 1 to include the power-spherical VAE:
+\begin{table}[H]
+    \centering
+    {\renewcommand{\arraystretch}{1.6}%
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lcccccccccccc}
+        \toprule
+        & \multicolumn{4}{c}{S-VAE (vMF, $\mathbb{S}^d$)} & \multicolumn{4}{c}{TNBBeta ($\mathbb{S}^d$)} & \multicolumn{4}{c}{Power Spherical ($\mathbb{S}^d$)} \\
+        \cmidrule(lr){2-5} \cmidrule(lr){6-9} \cmidrule(lr){10-13}
+        $d$ & LL & L[q] & RE & KL & LL & L[q] & RE & KL & LL & L[q] & RE & KL \\
+        \midrule
+        2  & $-130.86 \pm 0.43$  & $-134.42 \pm 0.42$  & $-126.89 \pm 0.47$  & $7.53 \pm 0.08$   & $-130.11 \pm 0.57$ & $-134.21 \pm 0.46$ & $-126.43 \pm 0.54$ & $7.78 \pm 0.11$  & $-131.02 \pm 0.39$ & $-134.56 \pm 0.28$ & $-127.03 \pm 0.40$ & $7.53 \pm 0.13$ \\
+        5  & $-105.27 \pm 0.14$  & $-109.32 \pm 0.08$  & $-95.56 \pm 0.12$   & $13.76 \pm 0.06$  & $-104.89 \pm 0.22$ & $-109.15 \pm 0.22$ & $-95.36 \pm 0.26$  & $13.79 \pm 0.13$ & $-105.37 \pm 0.17$ & $-109.38 \pm 0.22$ & $-95.67 \pm 0.22$  & $13.71 \pm 0.08$ \\
+        10 & $-89.38 \pm 0.02$   & $-93.60 \pm 0.06$   & $-71.84 \pm 0.08$   & $21.77 \pm 0.05$  & $-89.29 \pm 0.10$  & $-93.65 \pm 0.14$  & $-71.96 \pm 0.25$  & $21.69 \pm 0.14$ & $-89.42 \pm 0.10$  & $-93.69 \pm 0.09$  & $-71.97 \pm 0.10$  & $21.71 \pm 0.03$ \\
+        20 & $-86.84 \pm 0.04$   & $-92.10 \pm 0.05$   & $-62.63 \pm 0.21$   & $29.47 \pm 0.18$  & $-86.90 \pm 0.23$  & $-92.12 \pm 0.15$  & $-62.33 \pm 0.41$  & $29.78 \pm 0.53$ & $-86.95 \pm 0.08$  & $-92.17 \pm 0.07$  & $-62.72 \pm 0.18$  & $29.45 \pm 0.15$ \\
+        40 & $-144.28 \pm 31.06$ & $-170.06 \pm 41.29$ & $-162.32 \pm 56.08$ & $7.73 \pm 14.79$  & $-89.09 \pm 0.15$  & $-96.38 \pm 0.14$  & $-62.53 \pm 0.42$  & $33.86 \pm 0.36$ & $-89.04 \pm 0.11$  & $-96.37 \pm 0.13$  & $-62.17 \pm 0.23$  & $34.20 \pm 0.23$ \\
+        \bottomrule
+    \end{tabular}%
+    }}
+    \caption{MNIST Table 1, same as last week, replacing the Gaussian results with the power-spherical VAE.}
+    \label{tab:mnist-table1}
+\end{table}
+Importantly, there is no significant difference between any of the hyperspherical methods, except at
+$d=40$, in which the S-VAE becomes unstable as we saw last week. Though the power-spherical VAE fixes
+this problem, it achieves similar results to the TNBBeta-VAE.
+
+Moving on to the graph representation task, I ran experiments with both the TNBBeta-VAE and S-VAE on
+PubMed last week, but saw nearly identical results with both posteriors. My hypothesis was that that
+dataset had too few connected communities, and as such a unimodal posterior was sufficient to describe
+the latent space. The Stanford DBLP dataset is significantly more diverse. It's a co-authorship network
+built on research papers in computer science. Each node is an author, and they are connected if they
+have published at least one paper together. Ground-truth communities are defined by publication venue.
+Per Stanford's dataset statistics, the graph has a clustering coefficient of $\approx 0.63$, indicating
+that there are many connected communities, indicating that a VAE with a multimodal latent could aid in
+graph representation problems.
+
+To test this hypothesis out, I trained a graph-VAE on com-DBLP, and evaluated link prediction (i.e.
+predicting whether two held-out nodes are actually connected). Note that there are no node features in this
+particular dataset. To assess performance, I evaluated AUC and AP both on the entire test set, as well as
+buckets of the test set grouped by the number of communities the contained nodes belong to. We see that
+the TNBBeta-VAE outperforms both the S-VAE and the power-spherical VAE:
+
+\begin{table}[H]
+    \centering
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{lccccc}
+        \toprule
+        Metric & TNBBeta & Power Spherical & vMF & TNB vs.\ PS & TNB vs.\ vMF \\
+        \midrule
+        Primary AUC   & \textbf{0.9205 $\pm$ 0.0120} & 0.8901 $\pm$ 0.0122 & 0.8794 $\pm$ 0.0180 & $p=0.0074$ & $p=0.0068$ \\
+        Primary AP    & \textbf{0.9237 $\pm$ 0.0095} & 0.8891 $\pm$ 0.0113 & 0.8810 $\pm$ 0.0165 & $p=0.0017$ & $p=0.0036$ \\
+        Secondary AUC & \textbf{0.8610 $\pm$ 0.0200} & 0.8212 $\pm$ 0.0183 & 0.8059 $\pm$ 0.0253 & $p=0.0192$ & $p=0.0098$ \\
+        Secondary AP  & \textbf{0.7816 $\pm$ 0.0222} & 0.7033 $\pm$ 0.0252 & 0.6884 $\pm$ 0.0342 & $p=0.0017$ & $p=0.0027$ \\
+        \bottomrule
+    \end{tabular}%
+    }
+    \caption{Link-prediction AUC/AP (mean $\pm$ std, 5 seeds), aggregated over the whole test set
+    and broken down by a bridge node's primary vs.\ secondary community. $p$-values are Welch's
+    $t$-test.}
+    \label{tab:dblp-headline}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{assets/dblp_dose_response.png}
+    \caption{Link-prediction AUC and AP by community bucket.}
+    \label{fig:dose-response}
+\end{figure}
+It is important to note that in all cases, the SphericalTNBBeta posterior always had
+$\varepsilon < (d - 1)/2$, meaning that this particular task leveraged multimodality of the
+posterior. \Cref{thm:vmf-ps-unimodal} shows that this cannot possibly hold for the vMF or
+power-spherical distributions:
+\begin{theorem}[Unimodality of vMF and Power Spherical]
+\label{thm:vmf-ps-unimodal}
+For every $\boldsymbol{\mu} \in \mathbb{S}^{d - 1}$ and every $\kappa > 0$, the
+$\mathrm{vMF}(\boldsymbol{\mu}, \kappa)$ and $\mathrm{PowerSpherical}(\boldsymbol{\mu}, \kappa)$
+distributions are unimodal, with unique mode at $\boldsymbol{\mu}$.
+\end{theorem}

@@ -1,0 +1,14 @@
+I don't exactly have any ``open questions'' this week, per se, so I'll take the time to
+use this section as a space for reflections. It seems as though, when the latent space is
+``simple'' enough (e.g. MNIST), the TNBBeta-VAE is comfortable ditching its multimodal
+capacity. When the space gets more complicated (i.e. representing graphs with several
+connected communities), the model adapts and uses its capacity for expressivity. The
+benefit here is that one need not consider whether a unimodal or multimodal posterior is
+preferable when making a model selection decision; in the unimodal case, the TNBBeta-VAE
+performs just as well as the power-spherical VAE anyway. I see this model as a strict
+improvement, at the cost of an MC-estimated KL-divergence.
+
+I'd be curious in exploring other datasets in the wild that need to leverage multimodality.
+The fact that two of the SphericalTNBBeta modes are located at opposite poles of the unit
+hypersphere gives some signal here. A dataset such as positive/negative sentiment reviews
+could be useful in that respect.
