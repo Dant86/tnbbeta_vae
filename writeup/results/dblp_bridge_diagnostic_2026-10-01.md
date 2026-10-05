@@ -83,7 +83,7 @@ AP tells the same story, slightly more sharply (the 5+ bucket's AP gap is
 0.058 vs. PS, $p<0.001$, and 0.075 vs. vMF, $p=0.001$; full per-bucket
 numbers in the underlying `bridge_diagnostic_final.json` files).
 
-![AUC and AP vs. community count, each family's mean with a shaded std band, plus an edge-count-per-bucket panel](dblp_dose_response.png)
+![AUC and AP vs. community count, each family's mean with a shaded std band, plus an edge-count-per-bucket panel](../weekly_tex_summaries/week_2/assets/dblp_dose_response.png)
 
 `dblp_dose_response.png` (`apps.eval.dblp_dose_response_plot`) plots both
 metrics' full mean-$\pm$-std curves against community count, with a third

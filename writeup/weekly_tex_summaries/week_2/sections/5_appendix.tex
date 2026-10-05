@@ -1,0 +1,75 @@
+\begin{proof}[Proof of \Cref{thm:modality}]
+Recall the definition of the SphericalTNBBeta density from week 1's summary. We may proceed closely as in
+the proof of proposition 3.1 of \cite{lederman2026triplyrandomizednegativebinomialbeta}, and write
+\[
+    f(y) \defeq \mathrm{SphericalTNBBeta}(y; \boldsymbol{\mu}, p, q, \varepsilon) = \text{Beta}(y; \varepsilon, \varepsilon)\left[y(1 - y)\right]^{-\left(\frac{d - 3}{2}\right)}h(y)
+\]
+The function $h$ above is continuous, strictly positive, and bounded on $[0, 1]$, as argued in proposition 3.1.
+We now consider a slightly modified kernel:
+\[
+    K(y) = \frac{1}{B(\varepsilon, \varepsilon)}\left[y(1 - y)\right]^{\varepsilon - \frac{d - 1}{2}}
+\]
+The remainder of the proof is almost identical to that of proposition 3.1, with the exception that we now consider
+the cases $\varepsilon > (d - 1)/2$, $\varepsilon = (d - 1)/2$, and $\varepsilon < (d - 1)/2$.
+\end{proof}
+
+\begin{proof}[Proof of \Cref{thm:convergence}]
+Consider the family of random variables $\{Z_p\}_{p \in (0, 1)}$ where
+\[
+Z_p \sim \mathrm{SphericalTNBBeta}(\boldsymbol{\mu}, p, q, \varepsilon)
+\]
+We know that for each $p$, the latitude $Y_p$ is distributed $\mathrm{TNBBeta}(p, q, \varepsilon)$. Let
+$T_p \defeq (1 - Y_p)/(1 - p) = (1 - Y_p)/\delta$. It suffices to show that the family $\{T_p\}$ is tight.
+By change of variables, the density for $T_p$ is given by
+\begin{align*}
+    f_{\delta}(t) &= \delta\frac{(1 - \delta t)^{\varepsilon - 1}(\delta t)^{\varepsilon - 1}}{B(\varepsilon, \varepsilon)}\left[\frac{1 - q}{(1 - \delta t)\delta t}\gamma\right]^{\varepsilon}\left[1 - 4q\gamma\right]^{-\left(\varepsilon + \frac{1}{2}\right)} \\
+    &= \frac{1}{t(1 - \delta t)B(\varepsilon, \varepsilon)}\left[(1 - q)\gamma\right]^{\varepsilon}\left[1 - 4q\gamma\right]^{-\left(\varepsilon + \frac{1}{2}\right)} \\
+    &= \frac{(1 - q)^{\varepsilon}}{B(\varepsilon, \varepsilon)} \cdot \left[1 - 4q\gamma\right]^{-\left(\varepsilon + \frac{1}{2}\right)} \cdot \frac{\gamma^{\varepsilon}}{t(1 - \delta t)} 
+\end{align*}
+Because of the $\operatorname{sech}$ term, it follows that $\gamma \leq 1/4$ regardless of the value of $\delta$. We then see that
+\begin{align*}
+    f_{\delta}(t) &\leq \frac{(1 - q)^{\varepsilon}}{B(\varepsilon, \varepsilon)}(1 - q)^{-\left(\varepsilon + \frac{1}{2}\right)}\frac{\gamma^{\varepsilon}}{t(1 - \delta t)} = \frac{1}{\sqrt{1 - q}B(\varepsilon, \varepsilon)}\frac{\gamma^{\varepsilon}}{t(1 - \delta t)}
+\end{align*}
+Now, we rewrite $\gamma$:
+\begin{align*}
+    \gamma &= \frac{\delta t(1 - \delta t)(1 - \delta)\delta}{\left[(1 - \delta)\delta t + \delta(1 - \delta t)\right]^2} = \frac{t(1 - \delta t)(1 - \delta)}{\left[t(1 - \delta) + 1 - \delta t\right]^2}
+\end{align*}
+and we can see that for $\delta < 1/2$,
+\[
+    \frac{1}{\left[t(1 - \delta) + 1 - \delta t\right]^2} \leq \frac{1}{\left[1 + t(1 - 2\delta)\right]^2} \leq \frac{1}{\left[1 + ct\right]^2} \leq \frac{4}{t^2}
+\]
+Using the fact that $(1 - \delta) < 1$ we bound $\gamma$ above as
+\[
+    \gamma \leq \frac{4(1 - \delta t)}{t}
+\]
+Hence, substituting this inequality for $\gamma$ back into $f_{\delta}$ yields
+\[
+    f_{\delta}(t) \leq \underbrace{\frac{4^{\varepsilon}}{\sqrt{1 - q}B(\varepsilon, \varepsilon)}}_{K}t^{-\varepsilon - 1}(1 - \delta t)^{\varepsilon - 1} \leq Kt^{-\varepsilon - 1}
+\]
+It then follows that for any $\zeta > 0$, choose $M = (\zeta K/\varepsilon)^{(1/\varepsilon)}$ such that
+\[
+    \mathbb{P}\left\{T_p > M\right\} \leq K\int_M^{1/\delta} t^{-\varepsilon - 1}\mathrm{d}t < K\int_M^{\infty} t^{-\varepsilon - 1}\mathrm{d}t = \frac{K}{\varepsilon M^{\varepsilon}} = \zeta
+\]
+and so the family $\{T_p\}$ is tight since $p$ was chosen arbitrarily above.
+
+It immediately follows from tightness of $T_p$ that $Z_p$ is concentrated within $O(1 - p)$ about $\boldsymbol{\mu}$.
+Now, we see that for any $\zeta$, as $p \to 1$,
+\[
+    \mathbb{P}\left\{1 - Y_p > \zeta\right\} = \mathbb{P}\left\{T_p > \frac{\zeta}{1 - p}\right\} \to 0
+\]
+It follows that $Y_p \to 1$ in probability, and thus $Z_p \to \boldsymbol{\mu}$ in probability.
+\end{proof}
+
+\begin{proof}[Proof of \Cref{thm:vmf-ps-unimodal}]
+This largely follows from definitions 1 and 2 of \cite{decao2020powersphericaldistribution}.
+Fix $\boldsymbol{\mu} \in \mathbb{S}^{d - 1}, \kappa > 0$. The unnormalized vMF and power-spherical densities
+are given by
+\[
+    p_{\text{vMF}}(\mathbf{x}; \boldsymbol{\mu}, \kappa) \propto \exp\left\{ \kappa\boldsymbol{\mu}^\top\mathbf{x} \right\}
+    , \quad
+    p_{\text{PS}}(\mathbf{x}; \boldsymbol{\mu}, \kappa) \propto \left(1 + \boldsymbol{\mu}^\top\mathbf{x}\right)^\kappa
+\]
+Since $\kappa > 0$, observe that $\exp$ and $y \mapsto y^\kappa$ are monotone increasing in $\boldsymbol{\mu}^\top\mathbf{x}$,
+which is uniquely maximized (equal to 1) by $\mathbf{x} = \boldsymbol{\mu}$. Hence, both densities admit a unique mode at
+$\mathbf{x} = \boldsymbol{\mu}$.
+\end{proof}

@@ -1,1 +1,28 @@
-TBD -- what this week's work was and why.
+Following last week's empirical discovery that the TNBBeta-VAE posteriors
+closely resembled the S-VAE's posteriors\footnote{recall: cap-shaped structure on the
+sphere.}, the primary goals for this week were:
+\begin{enumerate}
+    \item Understand why the posteriors converge to each other
+    \item Determine whether there are situations in which they do not
+\end{enumerate}
+I additionally included the power-spherical VAE \citep{decao2020powersphericaldistribution}
+in this week's comparisons. We discovered two clear wins for the TNBBeta-VAE last week:
+this model buys us significantly faster sampling over the S-VAE while admitting stable
+gradient calculation in high dimensions. The power-spherical VAE has the exact same benefits,
+while additionally having a closed-form KL divergence to the uniform prior\footnote{we use MC estimates for the TNBBeta-VAE.}.
+If we were to find a scenario in which the TNBBeta-VAE additionally outperforms the power-spherical
+VAE on a particular task, then we could paint a more complete picture on how this model improves
+upon existing hyperspherical approaches to VAEs.
+
+As we will see in section 2, I was able to answer both questions (1) and (2). In the limit
+$p \to 1$, under a specific condition on $\varepsilon$, the SphericalTNBBeta density and vMF
+density converge to dirac masses about the mean direction $\boldsymbol{\mu}$. Along this path,
+they both admit a cap-like shape about $\boldsymbol{\mu}$, though, crucially, their tails are
+fundamentally different in mass.
+To answer question (2), I trained a series of graph-VAEs on com-DBLP \citep{DBLP:journals/corr/abs-1205-6233}
+in hopes that complex community relationships could tease out the additional expressivity of
+the SphericalTNBBeta. I found that the TNBBeta-VAE significantly outperformed both the S-VAE
+and the power-spherical VAE, and this performance was especially pronounced for nodes with
+edges connected to five or more communities. For this particular task, the SphericalTNBBeta
+posterior actually took on a bimodal shape that the vMF and power-spherical distributions can
+never attain.
