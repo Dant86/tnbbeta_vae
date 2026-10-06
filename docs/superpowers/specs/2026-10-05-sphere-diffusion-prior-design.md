@@ -53,13 +53,31 @@ re-derivation; see the scripts for the checks themselves.
    plays in Euclidean diffusion.
 
 4. **Combined schedule, verified end-to-end**
-   (`notebooks/tnbbeta_full_schedule_check.py`): `eps_t = 1 +
-   (eps_data-1)*exp(-t)` (one-shot Beta-Binomial resize from the data's
-   `eps_data`), `q_t` via point 2's kernel, `psi_t = logit(p_data)*exp(-t)`.
-   `t=0` recovers the data distribution exactly; `t >= 6` (at `speed=1`)
-   converges to `TNBbeta(0.5, q_target, 1)` regardless of starting
-   `(p_data, q_data, eps_data)` (tested across `eps_data` both above and
-   below 1, i.e. both the merge and split directions).
+   (`notebooks/tnbbeta_full_schedule_check.py`): `eps_t = eps_target +
+   (eps_data-eps_target)*exp(-t)` (one-shot Beta-Binomial resize from the
+   data's `eps_data`), `q_t` via point 2's kernel, `psi_t =
+   logit(p_data)*exp(-t)`. `t=0` recovers the data distribution exactly;
+   `t >= 6` (at `speed=1`) converges to `TNBbeta(0.5, q_target,
+   eps_target)` regardless of starting `(p_data, q_data, eps_data)`
+   (tested with `eps_target=1`, both above and below it, i.e. both the
+   merge and split directions).
+
+   **Important correction caught while writing the implementation plan:**
+   the verification scripts used `eps_target=1` throughout, which makes the
+   *latitude* `Y` uniform on `(0,1)` in isolation -- but `eps=1` does
+   **not** make the full spherical distribution uniform on `S^(dim-1)`.
+   `TNBBetaSpherical`'s density carries a `(1-w^2)^((dim-3)/2)` Jacobian
+   factor (see `tnbbeta_spherical.py`'s `log_prob`), so the latitude needs
+   density `(1-w^2)^((dim-3)/2)` to cancel it, i.e. `eps = (dim-1)/2`
+   (`uniform_prior_params(dim)` in `models/priors/tnbbeta_spherical.py`
+   already encodes exactly this: `(p,q,eps) = (0.5, 0, (dim-1)/2)`). The
+   merge/split/Leisen-kernel mechanism verified in points 1-4 is correct
+   for *any* fixed target `eps`, including this one -- only the target
+   *value* used when wiring this into the spherical model needs to be
+   `eps_target = (latent_dim-1)/2`, not the `eps_target=1` the standalone
+   verification scripts used. The implementation plan uses
+   `uniform_prior_params(latent_dim)[2]` as `eps_target`, not a literal
+   `1`.
 
 5. **The spherical lift needs no separate treatment.** In
    `TNBBetaSpherical.rsample()`, the non-latitude direction is drawn
@@ -173,7 +191,9 @@ Stage 2 (new model, this spec):
   cosine_similarity(ẑ_0, z_0)` (simple, scale-free; MSE is a documented
   alternative to try if cosine underperforms).
 - **`generate(n)`**: `z ~ Uniform(sphere)` (reuse
-  `FixedTNBBetaSphericalPrior` at `p=0.5, q=0, eps=1`); for a decreasing
+  `FixedTNBBetaSphericalPrior(latent_dim, *uniform_prior_params(latent_dim))`,
+  i.e. `p=0.5, q=0, eps=(latent_dim-1)/2` -- see the correction in point 4);
+  for a decreasing
   step sequence `t_K=t_max > ... > t_1 > t_0=0`: `ẑ_0 = denoiser(z, t_k)`,
   then `z = noise_to(ẑ_0, t_{k-1})` (predict-then-renoise, point 7 -- an
   established pragmatic pattern, not a derived-optimal one); final `z`
