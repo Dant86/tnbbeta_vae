@@ -130,24 +130,31 @@ def draw_latitude(
     Returns:
         w_t, same shape as ``t``.
     """
-    p_data, q_data, eps_data, t = torch.broadcast_tensors(
+    p_data_t: Tensor
+    q_data_t: Tensor
+    eps_data_t: Tensor
+    p_data_t, q_data_t, eps_data_t, t = torch.broadcast_tensors(
         torch.as_tensor(p_data, dtype=t.dtype),
         torch.as_tensor(q_data, dtype=t.dtype),
         torch.as_tensor(eps_data, dtype=t.dtype),
         t,
     )
-    eps_t = eps_target + (eps_data - eps_target) * torch.exp(-t)
+    eps_t = eps_target + (eps_data_t - eps_target) * torch.exp(-t)
     c_data = torch.distributions.NegativeBinomial(
-        eps_data, probs=q_data, validate_args=False
+        eps_data_t, probs=q_data_t, validate_args=False
     ).sample()
-    c0_prime = resize_eps(c_data, eps_data, eps_t, q_data)
+    c0_prime = resize_eps(c_data, eps_data_t, eps_t, q_data_t)
     c_t = leisen_step(c0_prime, t, eps_t, q_target, speed)
 
-    a_t = torch.distributions.NegativeBinomial(eps_t + c_t, probs=0.5).sample()
-    b_t = torch.distributions.NegativeBinomial(eps_t + c_t, probs=0.5).sample()
+    a_t = torch.distributions.NegativeBinomial(
+        eps_t + c_t, probs=torch.tensor(0.5, dtype=t.dtype)
+    ).sample()
+    b_t = torch.distributions.NegativeBinomial(
+        eps_t + c_t, probs=torch.tensor(0.5, dtype=t.dtype)
+    ).sample()
     u_t = torch.distributions.Beta(eps_t + c_t + a_t, eps_t + c_t + b_t).rsample()
 
-    psi_t = _logit(p_data) * torch.exp(-t)
+    psi_t = _logit(p_data_t) * torch.exp(-t)
     y_t = torch.sigmoid(psi_t + _logit(u_t))
     return 2 * y_t - 1
 

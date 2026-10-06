@@ -8,6 +8,8 @@ speed; the threshold is loosened to match (stat < 0.03 rather than 0.01).
 
 from __future__ import annotations
 
+from typing import cast
+
 from scipy import stats
 import torch
 
@@ -20,7 +22,7 @@ _KS_STAT_MAX = 0.03
 
 def _ks_match(x: torch.Tensor, y: torch.Tensor) -> bool:
     stat, _ = stats.ks_2samp(x.numpy(), y.numpy())
-    return stat < _KS_STAT_MAX
+    return cast(float, stat) < _KS_STAT_MAX
 
 
 def _closed_form_y(p: float, q: float, eps: float, n: int) -> torch.Tensor:
@@ -40,8 +42,12 @@ def test_resize_eps_split_direction_matches_closed_form() -> None:
     resized = resize_eps(
         c, torch.full((_N,), eps_from), torch.full((_N,), eps_to), torch.full((_N,), q)
     )
-    a_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=p).sample()
-    b_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=1 - p).sample()
+    a_t = torch.distributions.NegativeBinomial(
+        eps_to + resized, probs=torch.tensor(p)
+    ).sample()
+    b_t = torch.distributions.NegativeBinomial(
+        eps_to + resized, probs=torch.tensor(1 - p)
+    ).sample()
     y = torch.distributions.Beta(
         eps_to + resized + a_t, eps_to + resized + b_t
     ).sample()
@@ -60,8 +66,12 @@ def test_resize_eps_merge_direction_matches_closed_form() -> None:
     resized = resize_eps(
         c, torch.full((_N,), eps_from), torch.full((_N,), eps_to), torch.full((_N,), q)
     )
-    a_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=p).sample()
-    b_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=1 - p).sample()
+    a_t = torch.distributions.NegativeBinomial(
+        eps_to + resized, probs=torch.tensor(p)
+    ).sample()
+    b_t = torch.distributions.NegativeBinomial(
+        eps_to + resized, probs=torch.tensor(1 - p)
+    ).sample()
     y = torch.distributions.Beta(
         eps_to + resized + a_t, eps_to + resized + b_t
     ).sample()
@@ -101,7 +111,7 @@ def test_leisen_step_converges_regardless_of_starting_q() -> None:
     )
 
     stat, _ = stats.ks_2samp(c_t_a.numpy(), c_t_b.numpy())
-    assert stat < _KS_STAT_MAX
+    assert cast(float, stat) < _KS_STAT_MAX
 
 
 def test_draw_latitude_recovers_data_at_t_zero() -> None:
