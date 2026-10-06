@@ -34,14 +34,14 @@ def test_resize_eps_split_direction_matches_closed_form() -> None:
     torch.manual_seed(0)
     p, q, eps_from, eps_to = 0.4, 0.6, 5.0, 2.0
     c = torch.distributions.NegativeBinomial(
-        torch.full((_N,), eps_from), probs=torch.full((_N,), 1 - q)
+        torch.full((_N,), eps_from), probs=torch.full((_N,), q)
     ).sample()
 
     resized = resize_eps(
         c, torch.full((_N,), eps_from), torch.full((_N,), eps_to), torch.full((_N,), q)
     )
-    a_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=1 - p).sample()
-    b_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=p).sample()
+    a_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=p).sample()
+    b_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=1 - p).sample()
     y = torch.distributions.Beta(
         eps_to + resized + a_t, eps_to + resized + b_t
     ).sample()
@@ -54,14 +54,14 @@ def test_resize_eps_merge_direction_matches_closed_form() -> None:
     torch.manual_seed(1)
     p, q, eps_from, eps_to = 0.4, 0.6, 1.0, 4.0
     c = torch.distributions.NegativeBinomial(
-        torch.full((_N,), eps_from), probs=torch.full((_N,), 1 - q)
+        torch.full((_N,), eps_from), probs=torch.full((_N,), q)
     ).sample()
 
     resized = resize_eps(
         c, torch.full((_N,), eps_from), torch.full((_N,), eps_to), torch.full((_N,), q)
     )
-    a_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=1 - p).sample()
-    b_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=p).sample()
+    a_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=p).sample()
+    b_t = torch.distributions.NegativeBinomial(eps_to + resized, probs=1 - p).sample()
     y = torch.distributions.Beta(
         eps_to + resized + a_t, eps_to + resized + b_t
     ).sample()

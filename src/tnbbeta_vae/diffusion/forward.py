@@ -63,7 +63,7 @@ def resize_eps(c: Tensor, eps_from: Tensor, eps_to: Tensor, q: Tensor) -> Tensor
     split_result = torch.distributions.Binomial(total_count=c, probs=split_pi).sample()
 
     merge_piece = torch.distributions.NegativeBinomial(
-        delta.clamp_min(_EPS), probs=1 - q, validate_args=False
+        delta.clamp_min(_EPS), probs=q, validate_args=False
     ).sample()
     merge_result = c + merge_piece
 
@@ -94,11 +94,9 @@ def leisen_step(
     theta_t = (1 - q_target) / (torch.exp(speed * t) - q_target)
     y_bin = torch.distributions.Binomial(total_count=c0, probs=theta_t).sample()
     z = torch.distributions.NegativeBinomial(
-        eps + y_bin, probs=1 - q_target * (1 - theta_t), validate_args=False
+        eps + y_bin, probs=q_target * (1 - theta_t)
     ).sample()
-    c_t = y_bin + z
-    # For t=0, return c0 exactly (identity property)
-    return torch.where(t == 0, c0, c_t)
+    return y_bin + z
 
 
 def draw_latitude(
@@ -140,7 +138,7 @@ def draw_latitude(
     )
     eps_t = eps_target + (eps_data - eps_target) * torch.exp(-t)
     c_data = torch.distributions.NegativeBinomial(
-        eps_data, probs=1 - q_data, validate_args=False
+        eps_data, probs=q_data, validate_args=False
     ).sample()
     c0_prime = resize_eps(c_data, eps_data, eps_t, q_data)
     c_t = leisen_step(c0_prime, t, eps_t, q_target, speed)
