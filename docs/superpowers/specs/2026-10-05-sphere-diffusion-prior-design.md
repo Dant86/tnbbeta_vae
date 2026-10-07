@@ -25,7 +25,10 @@ explicitly approximations or open questions, flagged as such below.
 All claims below are numerically verified (KS tests at N=200,000,
 `notebooks/tnbbeta_*.py`) against `TNBBetaUnivariate`'s closed-form density,
 except where marked otherwise. This section is a condensed reference, not a
-re-derivation; see the scripts for the checks themselves.
+re-derivation; see the scripts for the checks themselves, or
+[`docs/sphere_diffusion_math.md`](../sphere_diffusion_math.md) for the full
+step-by-step derivation (exactly how forward sampling works, and precisely
+which steps are conjugacy versus something else).
 
 1. **TNBbeta is exactly "mergeable/splittable" in `epsilon`**, holding
    `(p, q)` fixed: summing two independent Theorem-4.1 auxiliary-count
