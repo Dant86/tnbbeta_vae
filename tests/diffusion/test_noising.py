@@ -1,4 +1,5 @@
-# tests/diffusion/test_noising.py
+"""Tests for tnbbeta_vae.diffusion.noising."""
+
 from __future__ import annotations
 
 from typing import cast
