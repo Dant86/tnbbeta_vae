@@ -18,6 +18,7 @@ from torch import Tensor, nn
 
 from tnbbeta_vae.diffusion.noising import noise_to
 from tnbbeta_vae.diffusion.schedule import DiffusionSchedule
+from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.architectures.denoiser_mlp import SphereDenoiserMLP
 from tnbbeta_vae.models.conv_vae import ConvTNBBetaSphericalVAE
 from tnbbeta_vae.models.priors.tnbbeta_spherical import uniform_prior_params
@@ -76,6 +77,8 @@ class SphereDiffusionPrior(nn.Module):
             config: Hyperparameters; see :class:`SphereDiffusionPriorConfig`.
 
         Raises:
+            FileNotFoundError: If no checkpoint exists at ``config.vae_run_name``
+                (e.g. a preempted run that only ever wrote ``latest.pt``).
             TypeError: If the checkpoint at ``config.vae_run_name`` is not a
                 ``ConvTNBBetaSphericalVAE``.
         """
@@ -89,7 +92,18 @@ class SphereDiffusionPrior(nn.Module):
         from tnbbeta_vae.training.checkpoint import load_model_checkpoint
 
         vae_path = checkpoint_dir() / config.vae_run_name / "final.pt"
-        vae, _ = load_model_checkpoint(vae_path)
+        try:
+            vae, _ = load_model_checkpoint(vae_path)
+        except FileNotFoundError as error:
+            raise FileNotFoundError(
+                f"SphereDiffusionPrior could not find a VAE checkpoint for "
+                f"vae_run_name={config.vae_run_name!r} at {vae_path} -- check that "
+                "this run name is correct and that it finished with a 'final.pt' "
+                "(a preempted run that only ever wrote 'latest.pt' cannot host a "
+                "diffusion prior yet). Checkpoints are looked up under "
+                "$TNBBETA_CHECKPOINT_DIR (see tnbbeta_vae.paths.checkpoint_dir), "
+                f"currently resolving to {checkpoint_dir()}."
+            ) from error
         if not isinstance(vae, ConvTNBBetaSphericalVAE):
             raise TypeError(
                 "SphereDiffusionPrior requires a ConvTNBBetaSphericalVAE checkpoint "
@@ -115,11 +129,39 @@ class SphereDiffusionPrior(nn.Module):
         self.vae.eval()
         return self
 
-    def training_step(self, batch: Tensor) -> dict[str, Tensor]:
+    def forward(self, x: Tensor) -> tuple[Tensor, TNBBetaSpherical, Tensor]:
+        """Delegates to the frozen VAE's own ``forward`` (encode/sample/decode).
+
+        This diffusion prior only replaces the VAE's *prior* at generation
+        time (see :meth:`generate`); reconstruction from a real input goes
+        through the VAE exactly as it always did.
+        """
+        return self.vae.forward(x)
+
+    def posterior_and_prior(
+        self, x: Tensor
+    ) -> tuple[TNBBetaSpherical, TNBBetaSpherical]:
+        """Delegates to the frozen VAE's own ``posterior_and_prior``.
+
+        The VAE's posterior is genuinely what eval scripts probing this
+        model's latent space want; this diffusion prior only replaces the
+        VAE's fixed uniform *prior* at generation time, not its posterior.
+        """
+        return self.vae.posterior_and_prior(x)
+
+    def log_likelihood(self, x: Tensor, z: Tensor) -> Tensor:
+        """Delegates to the frozen VAE's own ``log_likelihood``."""
+        return self.vae.log_likelihood(x, z)
+
+    def training_step(self, batch: Tensor, kl_weight: float = 1.0) -> dict[str, Tensor]:
         """Computes the z_0-regression loss for one batch of images.
 
         Args:
             batch: Input images, shape ``(batch_size, 3, image_size, image_size)``.
+            kl_weight: Unused. Accepted only so ``Trainer.fit(...,
+                kl_warmup_epochs=N)`` doesn't crash when run against this
+                model -- there is no KL term in this regression objective
+                for a warm-up weight to apply to.
 
         Returns:
             A dict with ``"loss"`` (mean ``1 - cosine_similarity``).

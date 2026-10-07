@@ -89,12 +89,35 @@ def test_build_via_registry_applies_overrides(tmp_path: Path) -> None:
     assert model.config.denoiser_hidden_dim == 16
 
 
+def test_schedule_eps_target_derived_from_latent_dim(tmp_path: Path) -> None:
+    """Review Focus: eps_target must be (latent_dim - 1) / 2, not a literal default.
+
+    ``_train_tiny_vae`` uses ``latent_dim=4``, giving ``eps_target=1.5`` -- a
+    non-trivial value, not the kind of number that would pass by accident.
+    """
+    model = _small_diffusion_model(tmp_path)
+
+    assert model.latent_dim == 4
+    assert model.schedule.eps_target == (model.latent_dim - 1) / 2
+    assert model.schedule.eps_target == 1.5
+
+
 def test_rejects_a_non_tnbbeta_spherical_vae_checkpoint(tmp_path: Path) -> None:
     """Review Focus: pointing at the wrong model kind must fail clearly."""
     run_name = _train_tiny_gaussian_vae(tmp_path)
 
     with pytest.raises(TypeError, match="ConvTNBBetaSphericalVAE"):
         SphereDiffusionPrior(SphereDiffusionPriorConfig(vae_run_name=run_name))
+
+
+def test_missing_vae_checkpoint_raises_a_clear_error(tmp_path: Path) -> None:
+    """Review Focus: a bad vae_run_name must not surface a bare torch.load error."""
+    with pytest.raises(FileNotFoundError, match="vae_run_name") as exc_info:
+        SphereDiffusionPrior(SphereDiffusionPriorConfig(vae_run_name="does_not_exist"))
+
+    message = str(exc_info.value)
+    assert "does_not_exist" in message
+    assert "TNBBETA_CHECKPOINT_DIR" in message
 
 
 def test_training_step_returns_finite_loss(tmp_path: Path) -> None:
@@ -129,6 +152,41 @@ def test_training_step_never_samples_t_below_t_min(
 
     assert seen_t, "training_step never drew a t -- test fixture is out of date"
     assert all((t >= 0.5).all() for t in seen_t)
+
+
+def test_training_step_loss_decreases_on_overfit_batch(tmp_path: Path) -> None:
+    """Spec's promised overfit convergence check: loss decreases.
+
+    Trains the denoiser on a small, fixed batch of images for a few hundred
+    steps and asserts the loss drops meaningfully -- the one test that would
+    catch the denoiser becoming a no-op. Loss is averaged over several
+    evaluations before and after training (rather than a single call) to
+    smooth over the randomness in ``training_step``'s own ``t`` and
+    ``z_0`` draws, so the comparison isn't flaky against the fixed seed.
+    """
+    torch.manual_seed(0)
+    model = _small_diffusion_model(tmp_path)
+    optimizer = torch.optim.Adam(model.denoiser.parameters(), lr=1e-2)
+    images = torch.rand(8, 3, 32, 32)
+
+    def _mean_loss(num_evals: int = 10) -> float:
+        with torch.no_grad():
+            return (
+                sum(
+                    model.training_step(images)["loss"].item() for _ in range(num_evals)
+                )
+                / num_evals
+            )
+
+    initial_loss = _mean_loss()
+    for _ in range(300):
+        optimizer.zero_grad()
+        loss = model.training_step(images)["loss"]
+        loss.backward()
+        optimizer.step()
+    final_loss = _mean_loss()
+
+    assert final_loss < initial_loss * 0.9, (initial_loss, final_loss)
 
 
 def test_training_step_gradients_flow_only_to_the_denoiser(tmp_path: Path) -> None:
@@ -189,6 +247,43 @@ def test_generate_handles_single_reverse_step(tmp_path: Path) -> None:
     assert torch.isfinite(images).all()
 
 
+def test_forward_delegates_to_the_vae(tmp_path: Path) -> None:
+    """Review Focus: eval scripts call model(batch)[0] expecting a reconstruction."""
+    torch.manual_seed(0)
+    model = _small_diffusion_model(tmp_path)
+    images = torch.rand(4, 3, 32, 32)
+
+    reconstruction, posterior, z = model(images)
+
+    assert reconstruction.shape == images.shape
+    assert z.shape == (4, model.latent_dim)
+
+
+def test_posterior_and_prior_delegates_to_the_vae(tmp_path: Path) -> None:
+    """Review Focus: most eval scripts call model.posterior_and_prior(batch)."""
+    torch.manual_seed(0)
+    model = _small_diffusion_model(tmp_path)
+    images = torch.rand(4, 3, 32, 32)
+
+    posterior, prior = model.posterior_and_prior(images)
+
+    assert posterior.mean_direction.shape == (4, model.latent_dim)
+    assert prior.mean_direction.shape[-1] == model.latent_dim
+
+
+def test_log_likelihood_delegates_to_the_vae(tmp_path: Path) -> None:
+    torch.manual_seed(0)
+    model = _small_diffusion_model(tmp_path)
+    images = torch.rand(4, 3, 32, 32)
+    posterior, _ = model.posterior_and_prior(images)
+    z = posterior.rsample()
+
+    log_likelihood = model.log_likelihood(images, z)
+
+    assert log_likelihood.shape == (4,)
+    assert torch.isfinite(log_likelihood).all()
+
+
 def _available_accelerator() -> str | None:
     if torch.cuda.is_available():
         return "cuda"
@@ -233,3 +328,24 @@ def test_trainer_runs_end_to_end(tmp_path: Path) -> None:
     metrics_path = trainer.run_logger.run_dir / "metrics.jsonl"
     assert metrics_path.exists()
     assert len(metrics_path.read_text().splitlines()) > 0
+
+
+def test_trainer_runs_with_kl_warmup_epochs(tmp_path: Path) -> None:
+    """Review Focus: --kl-warmup-epochs must not crash training_step with an
+    unexpected kl_weight kwarg, even though this model has no KL term."""
+    torch.manual_seed(0)
+    model = _small_diffusion_model(tmp_path)
+    optimizer = torch.optim.Adam(model.denoiser.parameters(), lr=1e-3)
+    trainer = Trainer(
+        model=model,
+        optimizer=optimizer,
+        model_name="tnbbeta_spherical_diffusion_prior",
+        config=model.config,
+        runs_dir=tmp_path / "runs3",
+    )
+    dataloader = [torch.rand(4, 3, 32, 32) for _ in range(3)]
+
+    trainer.fit(dataloader, num_epochs=2, kl_warmup_epochs=1)
+
+    metrics_path = trainer.run_logger.run_dir / "metrics.jsonl"
+    assert metrics_path.exists()
