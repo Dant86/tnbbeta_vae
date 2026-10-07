@@ -26,7 +26,7 @@ Paper references (equation/theorem numbers as printed in the paper):
   ``v ~ Uniform(S^(d-2))``, sets ``t = 2*z - 1``, ``y = [t, sqrt(1-t^2)*v]``,
   and reflects ``y`` from the pole ``e_1`` to ``mu`` with a Householder
   reflection -- exactly the reflection :func:`~tnbbeta_vae.distributions.
-  tnbbeta_spherical._householder_reflect` implements, so it's reused here
+  tnbbeta_spherical.householder_reflect` implements, so it's reused here
   (see the note on :func:`rsample` below) rather than duplicated.
 * Theorem 15 (Eq. 62): the differential entropy is
   ``H(X) = log N_X(kappa,d) - kappa*(log(2) + psi(alpha) - psi(alpha+beta))``,
@@ -61,9 +61,9 @@ from torch.types import _size
 
 from tnbbeta_vae.distributions.hyperspherical_uniform import HypersphericalUniform
 from tnbbeta_vae.distributions.tnbbeta_spherical import (
-    _householder_reflect,
     _log_surface_area,
     _unit_sphere,
+    householder_reflect,
 )
 
 __all__ = ["PowerSpherical"]
@@ -186,7 +186,7 @@ class PowerSpherical(Distribution):
         radius = torch.sqrt((1 - w**2).clamp_min(0)).unsqueeze(-1)
         y = torch.cat([w.unsqueeze(-1), radius * v], dim=-1)
 
-        return _householder_reflect(y, mean_direction)
+        return householder_reflect(y, mean_direction)
 
     def entropy(self) -> Tensor:
         """Differential entropy (Theorem 15, Eq. 62)."""

@@ -43,7 +43,7 @@ from torch.types import _size
 
 from tnbbeta_vae.distributions.tnbbeta_univariate import TNBBetaUnivariate
 
-__all__ = ["TNBBetaSpherical"]
+__all__ = ["TNBBetaSpherical", "householder_reflect"]
 
 _BOUNDARY_EPS = 1e-6
 _HOUSEHOLDER_DEGENERACY_EPS = 1e-6
@@ -194,7 +194,7 @@ class TNBBetaSpherical(Distribution):
         radius = torch.sqrt((1 - w**2).clamp_min(0)).unsqueeze(-1)
         z = torch.cat([w.unsqueeze(-1), radius * v], dim=-1)
 
-        return _householder_reflect(z, mean_direction)
+        return householder_reflect(z, mean_direction)
 
 
 def _log_surface_area(ambient_dim: int) -> float:
@@ -206,7 +206,7 @@ def _log_surface_area(ambient_dim: int) -> float:
     )
 
 
-def _householder_reflect(z: Tensor, mean_direction: Tensor) -> Tensor:
+def householder_reflect(z: Tensor, mean_direction: Tensor) -> Tensor:
     """Reflects ``z`` from the pole ``e_1`` to ``mean_direction`` (or back).
 
     Uses the Householder reflection ``U = I - 2*u*u^T`` with
@@ -214,6 +214,9 @@ def _householder_reflect(z: Tensor, mean_direction: Tensor) -> Tensor:
     satisfies ``U @ e_1 == mean_direction``. ``U`` is symmetric and its own
     inverse, so this same function also maps ``mean_direction``-frame
     vectors back to the pole frame.
+
+    Also used directly by tnbbeta_vae.diffusion.noising to noise/reflect
+    points during the diffusion prior's forward process.
 
     Args:
         z: Points on the sphere, shape ``(..., dim)``.
