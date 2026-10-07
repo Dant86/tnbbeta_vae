@@ -124,7 +124,11 @@ class VonMisesFisher(Distribution):
             .to(self.device)
             .transpose(0, -1)[1:]
         ).transpose(0, -1)
-        v = v / v.norm(dim=-1, keepdim=True)
+        # clamp_min guards the same near-zero-norm edge case _householder_rotation
+        # already guards below: at m == 2 this is a single standard-normal draw,
+        # which lands on exactly 0.0 (a 0 / 0 division) often enough over a few
+        # thousand training steps to be worth guarding, not just a theoretical risk.
+        v = v / v.norm(dim=-1, keepdim=True).clamp_min(1e-12)
 
         w_ = torch.sqrt(torch.clamp(1 - (w**2), 1e-10))
         x = torch.cat((w, w_ * v), -1)
