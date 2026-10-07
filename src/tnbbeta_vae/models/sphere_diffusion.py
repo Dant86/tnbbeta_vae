@@ -23,7 +23,6 @@ from tnbbeta_vae.models.conv_vae import ConvTNBBetaSphericalVAE
 from tnbbeta_vae.models.priors.tnbbeta_spherical import uniform_prior_params
 from tnbbeta_vae.paths import checkpoint_dir
 from tnbbeta_vae.registry import register_model
-from tnbbeta_vae.training.checkpoint import load_model_checkpoint
 
 __all__ = ["SphereDiffusionPrior", "SphereDiffusionPriorConfig"]
 
@@ -83,6 +82,12 @@ class SphereDiffusionPrior(nn.Module):
         super().__init__()
         self.config = config
 
+        # Imported here, not at module level: tnbbeta_vae.training.checkpoint
+        # imports tnbbeta_vae.models for its @register_model side effects, and
+        # tnbbeta_vae.models imports this module -- a module-level import here
+        # would make `import tnbbeta_vae.training` fail with a circular import.
+        from tnbbeta_vae.training.checkpoint import load_model_checkpoint
+
         vae_path = checkpoint_dir() / config.vae_run_name / "final.pt"
         vae, _ = load_model_checkpoint(vae_path)
         if not isinstance(vae, ConvTNBBetaSphericalVAE):
@@ -125,8 +130,10 @@ class SphereDiffusionPrior(nn.Module):
         z_0 = z_0.detach()
 
         batch_size = z_0.shape[0]
-        t = torch.distributions.Uniform(self.config.t_min, self.config.t_max).sample(
-            (batch_size,)
+        t = (
+            torch.distributions.Uniform(self.config.t_min, self.config.t_max)
+            .sample((batch_size,))
+            .to(z_0.device)
         )
         z_t = noise_to(
             z_0, t, self.schedule, self.config.p_start, 0.0, self.config.eps_start
@@ -147,7 +154,10 @@ class SphereDiffusionPrior(nn.Module):
         """
         z = self.vae.prior().sample(torch.Size([num_samples]))
         steps = torch.linspace(
-            self.config.t_max, 0.0, self.config.num_reverse_steps + 1
+            self.config.t_max,
+            0.0,
+            self.config.num_reverse_steps + 1,
+            device=z.device,
         )
         for i in range(self.config.num_reverse_steps):
             t_current, t_next = steps[i], steps[i + 1]

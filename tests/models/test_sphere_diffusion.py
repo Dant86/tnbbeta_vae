@@ -189,6 +189,31 @@ def test_generate_handles_single_reverse_step(tmp_path: Path) -> None:
     assert torch.isfinite(images).all()
 
 
+def _available_accelerator() -> str | None:
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return None
+
+
+@pytest.mark.skipif(_available_accelerator() is None, reason="no accelerator available")
+def test_training_step_and_generate_work_on_an_accelerator(tmp_path: Path) -> None:
+    """Review Focus: t/steps tensors must follow the model's device, not just CPU."""
+    torch.manual_seed(0)
+    device = _available_accelerator()
+    assert device is not None
+    model = _small_diffusion_model(tmp_path).to(device)
+    images = torch.rand(5, 3, 32, 32, device=device)
+
+    outputs = model.training_step(images)
+    assert torch.isfinite(outputs["loss"])
+
+    generated = model.generate(3)
+    assert generated.device.type == device
+    assert torch.isfinite(generated).all()
+
+
 def test_trainer_runs_end_to_end(tmp_path: Path) -> None:
     """Smoke test: the real model, the real Trainer, unstructured random batches."""
     torch.manual_seed(0)

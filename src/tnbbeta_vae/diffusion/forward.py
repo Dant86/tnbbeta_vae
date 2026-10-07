@@ -134,9 +134,9 @@ def draw_latitude(
     q_data_t: Tensor
     eps_data_t: Tensor
     p_data_t, q_data_t, eps_data_t, t = torch.broadcast_tensors(
-        torch.as_tensor(p_data, dtype=t.dtype),
-        torch.as_tensor(q_data, dtype=t.dtype),
-        torch.as_tensor(eps_data, dtype=t.dtype),
+        torch.as_tensor(p_data, dtype=t.dtype, device=t.device),
+        torch.as_tensor(q_data, dtype=t.dtype, device=t.device),
+        torch.as_tensor(eps_data, dtype=t.dtype, device=t.device),
         t,
     )
     eps_t = eps_target + (eps_data_t - eps_target) * torch.exp(-t)
@@ -147,10 +147,10 @@ def draw_latitude(
     c_t = leisen_step(c0_prime, t, eps_t, q_target, speed)
 
     a_t = torch.distributions.NegativeBinomial(
-        eps_t + c_t, probs=torch.tensor(0.5, dtype=t.dtype)
+        eps_t + c_t, probs=torch.tensor(0.5, dtype=t.dtype, device=t.device)
     ).sample()
     b_t = torch.distributions.NegativeBinomial(
-        eps_t + c_t, probs=torch.tensor(0.5, dtype=t.dtype)
+        eps_t + c_t, probs=torch.tensor(0.5, dtype=t.dtype, device=t.device)
     ).sample()
     u_t = torch.distributions.Beta(eps_t + c_t + a_t, eps_t + c_t + b_t).rsample()
 
