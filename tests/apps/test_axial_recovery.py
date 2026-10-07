@@ -32,7 +32,8 @@ def test_tnbbeta_diagnostics_m_mean_uses_latent_dim_minus_one_over_two() -> None
 
         diagnostics = axial_recovery._tnbbeta_diagnostics(model, x, centre)
 
-        expected = posterior.epsilon.mean().item() - (latent_dim - 1) / 2
+        epsilon = posterior.epsilon  # pyright: ignore[reportAttributeAccessIssue]
+        expected = epsilon.mean().item() - (latent_dim - 1) / 2
         assert diagnostics["m_mean"] == pytest.approx(expected)
 
 
