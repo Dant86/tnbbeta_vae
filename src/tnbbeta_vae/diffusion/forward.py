@@ -17,6 +17,14 @@ derivation):
 3. ``draw_latitude``: combines both with the exact p-decoupling identity
    (p enters the latitude purely as an additive logit-space shift) into the
    full forward-noising recipe for the latitude ``w = 2y - 1``.
+
+Convention note: ``torch.distributions.NegativeBinomial(r, probs=theta)``'s
+``theta`` is the probability of the event being *counted* (success before
+``r`` failures) -- the complement of the paper's ``q``/``p`` (Theorem 4.1's
+``NB(eps, 1-q)``, ``NB(eps+c, 1-p)``, ``NB(eps+c, p)``), which name the
+*stopping* probability. So every call below with ``probs=q`` (or
+``probs=p``/``probs=1-p``) is deliberately the complement of what the
+docstrings quote from the paper, not a bug to "fix" back to ``probs=1-q``.
 """
 
 from __future__ import annotations
@@ -63,7 +71,7 @@ def resize_eps(c: Tensor, eps_from: Tensor, eps_to: Tensor, q: Tensor) -> Tensor
     split_result = torch.distributions.Binomial(total_count=c, probs=split_pi).sample()
 
     merge_piece = torch.distributions.NegativeBinomial(
-        delta.clamp_min(_EPS), probs=q, validate_args=False
+        delta.clamp_min(_EPS), probs=q
     ).sample()
     merge_result = c + merge_piece
 
@@ -140,9 +148,7 @@ def draw_latitude(
         t,
     )
     eps_t = eps_target + (eps_data_t - eps_target) * torch.exp(-t)
-    c_data = torch.distributions.NegativeBinomial(
-        eps_data_t, probs=q_data_t, validate_args=False
-    ).sample()
+    c_data = torch.distributions.NegativeBinomial(eps_data_t, probs=q_data_t).sample()
     c0_prime = resize_eps(c_data, eps_data_t, eps_t, q_data_t)
     c_t = leisen_step(c0_prime, t, eps_t, q_target, speed)
 

@@ -30,6 +30,14 @@ parameter is `eps` and whose *probability* parameter is `1-q`. Everything
 below is about moving `C` from one `(eps, q)` to another, exactly, in
 closed form, without simulating anything in between.
 
+Every NB formula in this document uses the paper's convention above
+(`q`/`p` as the *stopping* probability). The code
+(`src/tnbbeta_vae/diffusion/forward.py`) writes the complements throughout
+-- `torch.distributions.NegativeBinomial(r, probs=theta)`'s `theta` is the
+probability of the *counted* event, i.e. `theta = 1 - q` (or `1 - p`) in
+this notation -- so `probs=q` in the code is the correct implementation of
+`NB(r, 1-q)` above, not a bug.
+
 ## Forward sampling, step by step
 
 Given a starting point (either the data's own `(p_data, q_data, eps_data)`,
