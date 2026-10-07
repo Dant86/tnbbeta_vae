@@ -1004,13 +1004,13 @@ def _isolated_checkpoint_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 def _small_diffusion_model(tmp_path: Path, **overrides: object) -> SphereDiffusionPrior:
     run_name = _train_tiny_vae(tmp_path)
-    config = SphereDiffusionPriorConfig(
-        vae_run_name=run_name,
-        denoiser_hidden_dim=16,
-        denoiser_depth=2,
-        num_reverse_steps=3,
-        **overrides,  # pyright: ignore[reportArgumentType]
-    )
+    defaults: dict[str, object] = {
+        "vae_run_name": run_name,
+        "denoiser_hidden_dim": 16,
+        "denoiser_depth": 2,
+        "num_reverse_steps": 3,
+    }
+    config = SphereDiffusionPriorConfig(**(defaults | overrides))  # pyright: ignore[reportArgumentType]
     return SphereDiffusionPrior(config)
 
 
