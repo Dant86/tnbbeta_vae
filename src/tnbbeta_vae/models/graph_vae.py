@@ -80,6 +80,16 @@ class GraphVAEConfig(BaseModel):
             lies in [-1, 1], which caps a link's logit. ``None`` (default) learns a
             positive multiplier on it, starting at 5; a number fixes it (1.0 is the
             plain inner product). Ignored for the Gaussian, whose latent scale is free.
+        feature_reconstruction_weight: Weight on an added node-feature reconstruction
+            term, on top of the usual link-prediction loss. ``0.0`` (the default)
+            means no feature decoder exists at all -- ``GraphVAE.__init__`` then
+            builds exactly the parameters it always has, so every checkpoint trained
+            before this field existed still loads with a strict
+            ``load_state_dict``. A value ``> 0`` adds a linear decoder from the
+            latent to per-feature Bernoulli logits (features are assumed binary,
+            as Planetoid's bag-of-words features are) and adds
+            ``feature_reconstruction_weight * <binary cross-entropy>`` to the
+            training loss.
     """
 
     family: LatentFamily = "tnbbeta"
@@ -88,6 +98,7 @@ class GraphVAEConfig(BaseModel):
     latent_dim: int = 16
     dropout: float = 0.0
     fixed_temperature: float | None = None
+    feature_reconstruction_weight: float = 0.0
 
 
 @register_model("graph_vae", config_cls=GraphVAEConfig)
@@ -111,6 +122,12 @@ class GraphVAE(nn.Module):
             torch.tensor(math.log(_INITIAL_TEMPERATURE)),
             requires_grad=config.fixed_temperature is None,
         )
+        # Constructed only when requested: an unconditionally-built, zero-weighted
+        # decoder would still add parameters, breaking strict load_state_dict on
+        # every checkpoint trained before this field existed (see CLAUDE.md).
+        self.feature_decoder: nn.Linear | None = None
+        if config.feature_reconstruction_weight > 0:
+            self.feature_decoder = nn.Linear(config.latent_dim, config.in_features)
 
     def training_step(
         self, batch: GraphBatch, kl_weight: float = 1.0
@@ -123,7 +140,10 @@ class GraphVAE(nn.Module):
 
         Returns:
             A dict with ``"loss"`` (link cross-entropy plus the KL divided by the
-            number of nodes), ``"link_loss"`` and ``"kl"`` (mean per node).
+            number of nodes, plus the weighted feature-reconstruction term if
+            ``config.feature_reconstruction_weight > 0``), ``"link_loss"`` and
+            ``"kl"`` (mean per node), and ``"feature_loss"`` (the raw, unweighted
+            reconstruction cross-entropy, detached) when the feature decoder exists.
         """
         posterior, prior = self.posterior_and_prior(batch)
         z = posterior.rsample()
@@ -139,11 +159,26 @@ class GraphVAE(nn.Module):
         except NotImplementedError:
             kl = posterior.log_prob(z) - prior.log_prob(z)
         kl_mean = kl.mean()
-        return {
-            "loss": link_loss + kl_weight * kl_mean / batch.num_nodes,
+        loss = link_loss + kl_weight * kl_mean / batch.num_nodes
+        result = {
+            "loss": loss,
             "link_loss": link_loss.detach(),
             "kl": kl_mean.detach(),
         }
+        if self.feature_decoder is not None:
+            feature_targets = (
+                batch.features.to_dense()
+                if batch.features.is_sparse
+                else batch.features
+            )
+            feature_loss = binary_cross_entropy_with_logits(
+                self.feature_decoder(z), feature_targets
+            )
+            result["loss"] = (
+                loss + self.config.feature_reconstruction_weight * feature_loss
+            )
+            result["feature_loss"] = feature_loss.detach()
+        return result
 
     def posterior_and_prior(
         self, batch: GraphBatch
