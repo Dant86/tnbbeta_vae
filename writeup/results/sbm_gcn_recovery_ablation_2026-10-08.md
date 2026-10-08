@@ -144,7 +144,9 @@ for seed in args.seeds:
     )
     torch.manual_seed(seed)
     config = GraphVAEConfig(
-        family="tnbbeta", in_features=graph.features.shape[1], latent_dim=args.latent_dim
+        family="tnbbeta",
+        in_features=graph.features.shape[1],
+        latent_dim=args.latent_dim,
     )
     model = GraphVAE(config)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
