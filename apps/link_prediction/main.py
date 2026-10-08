@@ -32,6 +32,7 @@ import torch
 from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
 from tnbbeta_vae.data.planetoid import (
     LinkSplit,
+    SparseMatrix,
     load_planetoid,
     normalized_adjacency,
     split_edges,
@@ -156,6 +157,7 @@ def run_once(
     seed: int,
     device: torch.device,
     run_name: str | None = None,
+    encoder_adjacency: SparseMatrix | None = None,
 ) -> dict[str, float]:
     """Trains one model and returns the metrics at its best-validation epoch.
 
@@ -173,6 +175,20 @@ def run_once(
             :func:`~tnbbeta_vae.training.load_model_checkpoint` and the ``apps.eval``
             scripts can read it). Not saved if ``None`` (the default, preserving this
             function's original metrics-only behavior).
+        encoder_adjacency: If given, a sparse adjacency matrix -- same convention as
+            ``split.train_adjacency`` (symmetric, binary, no self-loops) --
+            normalized the same way (:func:`~tnbbeta_vae.data.planetoid.
+            normalized_adjacency`) and used INSTEAD of ``split.train_adjacency`` for
+            the GCN encoder's aggregation step (``GraphBatch.norm_adjacency``). The
+            loss is unaffected: it always trains against the real edges from
+            ``split.train_adjacency`` (positive pairs, and the train/val/test
+            split), exactly as without this parameter -- only what the encoder
+            aggregates over changes. For example, a sparse identity matrix here
+            makes the encoder see each node's own transformed features with no
+            neighbor mixing at all, while the loss still trains against the real
+            graph's edges. ``None`` (the default) preserves this function's
+            original behavior exactly: the encoder also aggregates over
+            ``normalized_adjacency(split.train_adjacency)``.
 
     Returns:
         ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``, plus
@@ -196,7 +212,9 @@ def run_once(
         raise TypeError(f"Unsupported features type: {type(graph.features)}")
     batch = GraphBatch(
         features=features_tensor,
-        norm_adjacency=normalized_adjacency(split.train_adjacency),
+        norm_adjacency=normalized_adjacency(
+            split.train_adjacency if encoder_adjacency is None else encoder_adjacency
+        ),
         positive_edges=torch.as_tensor(upper, dtype=torch.long),
     ).to(device)
     model = GraphVAE(config).to(device)
