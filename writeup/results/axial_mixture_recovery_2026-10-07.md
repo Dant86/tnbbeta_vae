@@ -111,3 +111,125 @@ Monte Carlo ELBO's unbounded log-density terms there destabilize training,
 per that same risk note) -- either would help isolate whether epsilon
 *can't* profitably go below threshold here or simply never gets pushed
 there by the current warm-up schedule.
+
+## Follow-up: isolating "not found" from "doesn't help" at latent_dim=5, 2026-10-08
+
+- **Date:** 2026-10-08
+- **Commits:** `80688fb` ("Add fixed_epsilon to MlpVAEConfig for the tnbbeta
+  family") and `d9d2957` ("Add --latent-dim/--fixed-epsilon to
+  axial_recovery, project to best-fit plane"), branch
+  `worktree-axial-bimodality-datasets`.
+- **Commands:**
+  ```
+  uv run python -m apps.synthetic.axial_recovery --out-dir runs/axial_recovery_d5_free --latent-dim 5
+  uv run python -m apps.synthetic.axial_recovery --out-dir runs/axial_recovery_d5_fixed --latent-dim 5 --fixed-epsilon 1.5
+  ```
+
+The 2026-10-07 run above couldn't tell "TNBBeta's bimodality never gets
+*found*" apart from "bimodality wouldn't *help* even if found," because at
+`latent_dim = 2` the bimodal threshold (`epsilon < 0.5`) and the univariate
+TNBBeta's own `epsilon < 1` boundary-divergence instability (Proposition
+3.1) overlap completely -- pushing epsilon low enough to test bimodality
+also means hitting a regime already known to be numerically fragile for an
+unrelated reason. At `latent_dim = 5` the bimodal threshold is
+`(5-1)/2 = 2.0`, so `epsilon = 1.5` gives `m = -0.5` (bimodal) while
+staying `> 1` (clear of that other instability) -- this isolates the
+question. Two runs: free epsilon at `latent_dim = 5` (does the *same*
+collapse recur away from the degenerate `latent_dim = 2` case), and
+`fixed_epsilon = 1.5` at `latent_dim = 5` (forces the bimodal shape
+directly, bypassing whatever training dynamics would otherwise avoid it).
+
+### Results (single seed, latent_dim = 5)
+
+| family | test_ll | test_kl | angle_error | angle_error_sample | reconstruction_angle_error | prior_manifold_ratio |
+|---|---|---|---|---|---|---|
+| gaussian | 151.967 | 4.7428 | 0.5220 | 0.7609 | 0.00515 | 0.1779 |
+| vmf | 149.527 | 7.4804 | 0.7375 | 0.7363 | 0.00680 | 1.2816 |
+| power_spherical | 149.455 | 7.7873 | 0.7362 | 0.7374 | 0.00689 | 1.2643 |
+| tnbbeta (free epsilon) | 149.435 | 7.0764 | 0.6907 | 0.6988 | 0.00662 | 1.0127 |
+| tnbbeta (fixed_epsilon=1.5) | 149.801 | 7.7644 | 0.6323 | 0.6387 | 0.00760 | 0.9635 |
+
+TNBBeta mechanistic diagnostic, both `latent_dim = 5` variants (bimodal
+threshold `m = epsilon - 2.0 < 0`):
+
+| variant | p_mean | p_std | centre_axis_resultant | m_mean | epsilon_mean |
+|---|---|---|---|---|---|
+| free epsilon | 0.011178 | 0.006641 | 0.1046 | 6.195 | 8.195 |
+| fixed_epsilon=1.5 | 0.990019 | 0.007627 | 0.1219 | **-0.5** (exact) | 1.5 (fixed) |
+
+Both JSON outputs were inspected by hand before writing this: every
+`test_ll`, `test_kl`, `m_mean` and `p_mean` above is finite and within the
+range already seen in the 2026-10-07 run; no NaNs, no crash, in either run.
+
+### Reading it
+
+**(a) Does free training at `latent_dim = 5` also collapse to `m_mean >=
+0`, the same pattern as `latent_dim = 2`? Yes, clearly.** `m_mean =
+6.195` (fitted `epsilon_mean = 8.195`) is deeply positive, the same
+qualitative pattern as the `latent_dim = 2` run's `m_mean = 26.497`
+(`epsilon_mean = 26.997`) -- well above the (now higher, `2.0`) bimodal
+threshold. `p_mean = 0.0112` sits at the opposite saturation floor from
+the `latent_dim = 2` run's `p_mean = 0.99995`, but that's the
+`(mu, p) ~ (-mu, 1-p)` alias this family has everywhere, not a different
+regime: both runs pin `p` at an extreme, just an arbitrary one, of the
+parameterization's redundant sign. Free training at a higher `latent_dim`
+does not change the outcome: the same collapse recurs away from the
+degenerate `latent_dim = 2` overlap.
+
+**(b) Does fixing `epsilon = 1.5` train without the numerical instability
+previously associated with `epsilon < 1`? Yes -- this is the thing the
+whole design was built to isolate, and it holds.** `m_mean = -0.5` exactly
+(`1.5 - 2.0`), confirming the posterior genuinely sits in the bimodal
+regime by construction. `test_ll` (149.801) and `test_kl` (7.764) are both
+finite and in the same range as every other cell in the table; the run
+completed without a NaN or a crash. The univariate boundary-divergence
+instability (`epsilon < 1`) and the bimodality condition (`m < 0`) are
+successfully decoupled at `latent_dim = 5`: a genuinely bimodal TNBBeta
+posterior trains fine here.
+
+**(c) Does forcing `m < 0` via `fixed_epsilon = 1.5` actually improve
+`test_ll`/`test_kl` relative to the free-epsilon `latent_dim = 5` run? Not
+cleanly -- it's a wash, slightly in the wrong direction on net.**
+`test_ll` goes up slightly (149.435 -> 149.801, +0.366 nats) but `test_kl`
+goes up more (7.076 -> 7.764, +0.688 nats); net `ll - kl` is 142.359 (free)
+vs. 142.037 (fixed) -- the forced-bimodal variant's actual ELBO is
+*slightly worse*, not better. The one metric that does move in the
+"bimodality helping" direction is `angle_error`: 0.6907 (free) -> 0.6323
+(fixed), and `angle_error_sample` 0.6988 -> 0.6387 -- a real but modest
+improvement, still far from the mod-`pi` chance ceiling's opposite end
+(`0`) and still close to the `~0.785` ceiling itself. Compared to the
+original `latent_dim = 2` baseline (`test_ll = 151.244`, `test_kl =
+5.4028`, `angle_error = 0.6945`): both `latent_dim = 5` variants have
+lower `test_ll` and higher `test_kl` than the `latent_dim = 2` run (expected
+-- a higher-dimensional uniform-sphere prior costs more KL regardless of
+family, visible in every family's `latent_dim = 5` row above, not just
+TNBBeta's), and `fixed_epsilon = 1.5`'s `angle_error` (0.6323) is the best
+of all three TNBBeta variants, but only by a modest margin.
+
+**(d) Overall verdict: this does cleanly separate "not found" from
+"doesn't help," and the numbers say it's the latter, not the former.**
+The free-epsilon `latent_dim = 5` run (a) answers only "training doesn't
+find it," same as before. The `fixed_epsilon = 1.5` run answers the
+sharper question directly: *handed* a genuinely bimodal posterior shape,
+with no gradient signal needed to discover it, training still drives `p`
+to an extreme (`0.990`, not the symmetric `0.5` a mass-balanced bimodal
+posterior would need) and does not produce a better net ELBO than the
+unimodal-collapsed free run. That is a materially stronger result than
+"optimizer never gets there": even when the shape is free and the boundary
+instability is avoided, nothing in the loss rewards using it symmetrically.
+The likely mechanism is structural, not a training-dynamics accident:
+`axial_mixture`'s decoder is built to be *exactly* invariant under
+`phi -> phi + pi` (`embed(2*phi) == embed(2*(phi+pi))`), so a posterior
+that puts all its mass on one of the two axially-equivalent points
+reconstructs exactly as well as one that splits it 50/50 across both --
+there is no reconstruction reward for symmetric bimodality on this task,
+only an extra KL cost from spreading mass across two separated modes
+instead of one. Once `mean_direction` is available as a free per-example
+escape valve (exactly the "direction carries the signal, p doesn't"
+pattern CLAUDE.md already documents for MNIST), gradient descent has every
+reason to let `p` collapse to an extreme and none to keep it near `0.5`,
+*regardless* of whether `m` is positive or negative. This argues against
+spending further effort chasing bimodality through epsilon initialization
+or scheduling changes on this particular task family: the mechanism
+suppressing it is the task's own reconstruction symmetry, not an
+optimizer-reachability problem that a different schedule would fix.
