@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 import pytest
+import torch
 
 from apps.synthetic import sbm_recovery
 
@@ -157,3 +158,129 @@ def test_graph_and_split_use_graph_seed_not_the_per_run_training_seed(
     )
 
     assert seen_seeds == [123]
+
+
+def test_no_aggregation_runs_for_all_four_families_and_writes_expected_keys(
+    tmp_path: Path,
+) -> None:
+    """``--no-aggregation`` is the "aggregation OFF" arm: an end-to-end smoke run,
+    same pattern as the default (aggregation-ON) smoke test above.
+    """
+    sbm_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--num-communities",
+            "3",
+            "--nodes-per-community",
+            "10",
+            "--p-in",
+            "0.6",
+            "--p-out",
+            "0.05",
+            "--latent-dim",
+            "4",
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "3",
+            "--seed",
+            "0",
+            "--device",
+            "cpu",
+            "--run-name",
+            "sbm_recovery_noagg_smoke",
+            "--no-aggregation",
+        ]  # fmt: skip
+    )
+
+    results = json.loads((tmp_path / "out" / "sbm_recovery.json").read_text())
+    assert set(results) == {"gaussian", "vmf", "power_spherical", "tnbbeta"}
+    for family, metrics in results.items():
+        assert "no_checkpoint" not in metrics
+        assert math.isfinite(metrics["test_auc"])
+        assert math.isfinite(metrics["test_ap"])
+        assert "diverged" in metrics
+        if family == "tnbbeta":
+            assert {
+                "p_mean",
+                "q_mean",
+                "epsilon_mean",
+                "m_mean",
+                "frac_bimodal",
+            } <= set(metrics)
+        else:
+            assert "p_mean" not in metrics
+
+
+def test_no_aggregation_passes_an_identity_encoder_adjacency_to_run_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Confirms the flag is actually wired to ``run_once``'s ``encoder_adjacency``
+    (an identity matrix of the right size) rather than just accepted and ignored,
+    and that omitting the flag still passes ``None`` (the no-op default).
+    """
+    seen_encoder_adjacency: list[object] = []
+    real_run_once = sbm_recovery.run_once
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        seen_encoder_adjacency.append(kwargs["encoder_adjacency"])
+        return real_run_once(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sbm_recovery, "run_once", _spy)
+
+    sbm_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--num-communities",
+            "3",
+            "--nodes-per-community",
+            "10",
+            "--latent-dim",
+            "4",
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "1",
+            "--device",
+            "cpu",
+            "--run-name",
+            "sbm_recovery_noagg_spy",
+            "--no-aggregation",
+            "--families",
+            "gaussian",
+        ]  # fmt: skip
+    )
+
+    assert len(seen_encoder_adjacency) == 1
+    identity = seen_encoder_adjacency[0]
+    assert identity is not None
+    dense = torch.as_tensor(identity.toarray())  # type: ignore[union-attr]
+    assert torch.equal(dense, torch.eye(30))
+
+    seen_encoder_adjacency.clear()
+    sbm_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path / "out2"),
+            "--num-communities",
+            "3",
+            "--nodes-per-community",
+            "10",
+            "--latent-dim",
+            "4",
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "1",
+            "--device",
+            "cpu",
+            "--run-name",
+            "sbm_recovery_agg_spy",
+            "--families",
+            "gaussian",
+        ]  # fmt: skip
+    )
+
+    assert seen_encoder_adjacency == [None]

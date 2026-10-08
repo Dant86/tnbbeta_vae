@@ -38,6 +38,16 @@ goes bimodal, that isolates "GCN message-passing + a graph with
 community-correlated structure" as sufficient, independent of scale or anything
 else specific to real citation/co-authorship networks.
 
+``--no-aggregation`` is a further isolation on top of (c) ("aggregation OFF" vs.
+(c)'s "aggregation ON"): it holds the exact same SBM graph, edges and loss fixed,
+and removes only the GCN's neighbor-averaging, by passing
+``apps.link_prediction.main.run_once``'s ``encoder_adjacency`` parameter a sparse
+identity matrix. The encoder then sees each node's own (identity) feature row
+with no neighbor mixing at all, while training still targets the real SBM edges
+for the loss -- the sharpest remaining test of whether GCN aggregation itself
+(not just a graph-correlated training signal in some looser sense) is what
+(c) actually isolated.
+
 Writes ``sbm_recovery.json`` into ``--out-dir``.
 """
 
@@ -49,6 +59,7 @@ from pathlib import Path
 import sys
 from typing import Any, cast
 
+import scipy.sparse as sp
 import torch
 
 from apps.eval.graph_posterior_shape import graph_to_batch
@@ -134,6 +145,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--families", nargs="+", default=list(_FAMILIES), choices=list(_FAMILIES)
     )
+    parser.add_argument(
+        "--no-aggregation",
+        action="store_true",
+        help=(
+            "If set, the GCN encoder aggregates over a sparse identity matrix"
+            " (via run_once's encoder_adjacency) instead of the real graph's"
+            " normalized adjacency -- each node's posterior then depends only on"
+            " its own (identity) feature row, with no neighbor mixing at all. The"
+            " loss is unaffected: training still targets the real SBM edges from"
+            " `split`, exactly as without this flag. Everything else (graph scale,"
+            " latent_dim, families, seeds) is identical to the default"
+            " (aggregation-ON) run, so the two are directly comparable."
+        ),
+    )
     args = parser.parse_args(argv)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +176,11 @@ def main(argv: list[str] | None = None) -> None:
         val_fraction=args.val_fraction,
         test_fraction=args.test_fraction,
         seed=args.graph_seed,
+    )
+    encoder_adjacency = (
+        sp.identity(graph.adjacency.shape[0], format="csr", dtype="float32")
+        if args.no_aggregation
+        else None
     )
 
     results: dict[str, Any] = {}
@@ -172,6 +202,7 @@ def main(argv: list[str] | None = None) -> None:
             seed=args.seed,
             device=device,
             run_name=run_name,
+            encoder_adjacency=encoder_adjacency,
         )
         stats = _posterior_stats_for_checkpoint(run_name, args.seed, graph, device)
         results[family] = {**metrics, **stats}
