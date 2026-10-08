@@ -273,9 +273,7 @@ class AxialMixtureData:
         if generator is not None:
             torch.manual_seed(int(torch.randint(2**31, (1,), generator=generator)))
         angle = VonMises(centres, torch.tensor(_CONCENTRATION)).sample()
-        noise = self.noise_std * torch.randn(
-            num, self.ambient_dim, generator=generator
-        )
+        noise = self.noise_std * torch.randn(num, self.ambient_dim, generator=generator)
         return self.embed(angle) + noise, angle, component
 
 
