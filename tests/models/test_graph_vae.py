@@ -297,6 +297,45 @@ def _sparse_identity_batch(num_nodes: int, seed: int = 0) -> tuple[GraphBatch, A
     return batch, split
 
 
+def test_feature_reconstruction_weight_cli_flag_is_threaded_into_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TNBBETA_CHECKPOINT_DIR", str(tmp_path / "ckpt"))
+    monkeypatch.setenv("TNBBETA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(link_main, "load_planetoid", lambda *_: _community_graph())
+
+    link_main.main(
+        [
+            "--dataset",
+            "cora",
+            "--family",
+            "tnbbeta",
+            "--lrs",
+            "0.01",
+            "--dropouts",
+            "0",
+            "--latent-dims",
+            "4",
+            "--epochs",
+            "3",
+            "--seeds",
+            "0",
+            "--device",
+            "cpu",
+            "--feature-reconstruction-weight",
+            "0.5",
+            "--run-name",
+            "feature_recon_cli_test",
+        ]  # fmt: skip
+    )
+
+    checkpoint = torch.load(
+        tmp_path / "ckpt" / "feature_recon_cli_test_seed0" / "final.pt",
+        weights_only=False,
+    )
+    assert checkpoint["config"]["feature_reconstruction_weight"] == 0.5
+
+
 def test_default_config_state_dict_keys_are_unchanged() -> None:
     """Pins GraphVAE's state_dict key set so real cluster checkpoints keep loading.
 

@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--fixed-temperature", type=float, default=None)
+    parser.add_argument("--feature-reconstruction-weight", type=float, default=0.0)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument(
         "--run-name",
@@ -111,6 +112,7 @@ def main(argv: list[str] | None = None) -> None:
                     latent_dim=latent_dim,
                     dropout=dropout,
                     fixed_temperature=args.fixed_temperature,
+                    feature_reconstruction_weight=args.feature_reconstruction_weight,
                 ),
                 lr=lr,
                 epochs=epochs,
