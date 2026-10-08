@@ -91,3 +91,112 @@ def test_experiment_writes_metrics_and_figure(tmp_path: Path) -> None:
     assert "p_mean" not in results["power_spherical"]
     html = (tmp_path / "axial_recovery.html").read_text()
     assert "N-VAE" in html and "TNBBeta" in html and "Power Spherical" in html
+
+
+def test_project_to_plane_is_a_noop_at_latent_dim_2() -> None:
+    points = torch.randn(10, 2)
+
+    assert torch.equal(axial_recovery._project_to_plane(points), points)
+
+
+def test_project_to_plane_recovers_the_circle_at_higher_latent_dim() -> None:
+    """At latent_dim > 2 the true 2-D signal can sit in any subspace.
+
+    Embeds a known circle into R^5 via a fixed random orthonormal matrix
+    (columns from a QR decomposition), projects back down with
+    ``_project_to_plane``, and checks the projected points' angle (via the
+    existing rotation/reflection-tolerant ``axial_angle_error``) matches the
+    true angle. The angles are evenly spaced (not random) so the circle's
+    own sample mean is ~0 -- ``_project_to_plane`` centers before its SVD,
+    and a nonzero sample mean would itself distort the recovered angle,
+    which isn't what this test is checking.
+    """
+    true_angle = torch.linspace(-math.pi, math.pi, 501)[:-1]
+    circle = torch.stack([true_angle.cos(), true_angle.sin()], dim=-1)
+    generator = torch.Generator().manual_seed(0)
+    random_matrix = torch.randn(5, 2, generator=generator)
+    orthonormal, _ = torch.linalg.qr(random_matrix)
+    embedded = circle @ orthonormal.T
+
+    projected = axial_recovery._project_to_plane(embedded)
+
+    assert projected.shape == (500, 2)
+    assert axial_recovery.axial_angle_error(projected, true_angle) < 1e-3
+
+
+def test_experiment_runs_at_higher_latent_dim_with_free_epsilon(tmp_path: Path) -> None:
+    axial_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path),
+            "--epochs",
+            "2",
+            "--num-train",
+            "256",
+            "--num-test",
+            "64",
+            "--batch-size",
+            "64",
+            "--kl-warmup-epochs",
+            "1",
+            "--latent-dim",
+            "5",
+        ]  # fmt: skip
+    )
+
+    results = json.loads((tmp_path / "axial_recovery.json").read_text())
+    assert set(results) == {"gaussian", "vmf", "power_spherical", "tnbbeta"}
+    for metrics in results.values():
+        for key in (
+            "angle_error",
+            "angle_error_sample",
+            "reconstruction_angle_error",
+            "prior_manifold_ratio",
+            "test_ll",
+            "test_kl",
+        ):
+            assert math.isfinite(metrics[key])
+    assert {"p_mean", "p_std", "centre_axis_resultant", "m_mean"} <= set(
+        results["tnbbeta"]
+    )
+
+
+def test_experiment_runs_at_higher_latent_dim_with_fixed_epsilon(
+    tmp_path: Path,
+) -> None:
+    axial_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path),
+            "--epochs",
+            "2",
+            "--num-train",
+            "256",
+            "--num-test",
+            "64",
+            "--batch-size",
+            "64",
+            "--kl-warmup-epochs",
+            "1",
+            "--latent-dim",
+            "5",
+            "--fixed-epsilon",
+            "1.5",
+        ]  # fmt: skip
+    )
+
+    results = json.loads((tmp_path / "axial_recovery.json").read_text())
+    assert set(results) == {"gaussian", "vmf", "power_spherical", "tnbbeta"}
+    for metrics in results.values():
+        for key in (
+            "angle_error",
+            "angle_error_sample",
+            "reconstruction_angle_error",
+            "prior_manifold_ratio",
+            "test_ll",
+            "test_kl",
+        ):
+            assert math.isfinite(metrics[key])
+    assert {"p_mean", "p_std", "centre_axis_resultant", "m_mean"} <= set(
+        results["tnbbeta"]
+    )

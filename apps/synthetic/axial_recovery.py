@@ -78,6 +78,27 @@ def main(argv: list[str] | None = None) -> None:
         default=["gaussian", "vmf", "power_spherical", "tnbbeta"],
         choices=list(_TITLES),
     )
+    parser.add_argument(
+        "--latent-dim",
+        type=int,
+        default=2,
+        help=(
+            "Ambient latent dimension for every family. Default 2 keeps the"
+            " already-recorded latent_dim=2 result exactly reproducible."
+        ),
+    )
+    parser.add_argument(
+        "--fixed-epsilon",
+        type=float,
+        default=None,
+        help=(
+            "If set, forces the tnbbeta family's epsilon to this constant"
+            " (MlpVAEConfig.fixed_epsilon), rather than learning it. Ignored"
+            " for the other three families. Used to force the sign of"
+            " m = epsilon - (latent_dim - 1) / 2 (bimodal iff negative)"
+            " without relying on training to find it."
+        ),
+    )
     args = parser.parse_args(argv)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -93,7 +114,13 @@ def main(argv: list[str] | None = None) -> None:
     latents: dict[str, dict[str, torch.Tensor]] = {}
     for family in args.families:
         torch.manual_seed(args.seed)
-        model = MlpVAE(MlpVAEConfig(family=cast("Any", family), latent_dim=2))
+        config_kwargs: dict[str, Any] = {
+            "family": cast("Any", family),
+            "latent_dim": args.latent_dim,
+        }
+        if family == "tnbbeta" and args.fixed_epsilon is not None:
+            config_kwargs["fixed_epsilon"] = args.fixed_epsilon
+        model = MlpVAE(MlpVAEConfig(**config_kwargs))
         trainer = Trainer(
             model,
             torch.optim.Adam(model.parameters(), lr=1e-3),
@@ -106,11 +133,13 @@ def main(argv: list[str] | None = None) -> None:
         model.eval()
         centre = _centre(model, test_x, family)
         sample = _sample(model, test_x)
-        latents[family] = {"centre": centre, "sample": sample}
+        projected_centre = _project_to_plane(centre)
+        projected_sample = _project_to_plane(sample)
+        latents[family] = {"centre": projected_centre, "sample": projected_sample}
         metrics = importance_weighted_metrics(model, test_x, num_samples=500)
         results[family] = {
-            "angle_error": axial_angle_error(centre, test_angle),
-            "angle_error_sample": axial_angle_error(sample, test_angle),
+            "angle_error": axial_angle_error(projected_centre, test_angle),
+            "angle_error_sample": axial_angle_error(projected_sample, test_angle),
             "reconstruction_angle_error": _reconstruction_angle_error(
                 model, sample, manifold, manifold_angles, test_angle
             ),
@@ -120,7 +149,9 @@ def main(argv: list[str] | None = None) -> None:
             "learned_sigma": model.learned_scale().item(),
         }
         if family == "tnbbeta":
-            results[family].update(_tnbbeta_diagnostics(model, test_x, centre))
+            results[family].update(
+                _tnbbeta_diagnostics(model, test_x, projected_centre)
+            )
         print(family, json.dumps(results[family]))
 
     (args.out_dir / "axial_recovery.json").write_text(json.dumps(results, indent=2))
@@ -156,6 +187,34 @@ def axial_angle_error(latent: torch.Tensor, true_angle: torch.Tensor) -> float:
         wrapped = (residual - offset + math.pi / 2) % math.pi - math.pi / 2
         best = min(best, wrapped.abs().mean().item())
     return best
+
+
+def _project_to_plane(points: torch.Tensor) -> torch.Tensor:
+    """Projects points in R^latent_dim onto their best-fit 2-D plane.
+
+    A no-op at ``latent_dim == 2``. At a higher ``latent_dim`` the model can
+    place its 1-D true signal in any 2-D subspace of the sphere, not
+    necessarily the first two raw coordinates, so ``axial_angle_error``
+    (which reads ``latent[:, 0]``/``latent[:, 1]`` directly) and the scatter
+    plot both need this projection applied first. The plane is found by
+    centering the points and taking an SVD, then projecting onto the top-2
+    right-singular-vector directions -- the orientation SVD returns is
+    arbitrary (any rotation/reflection of a true orthonormal basis), which
+    is exactly what ``axial_angle_error``'s own rotation/reflection search
+    is built to tolerate.
+
+    Args:
+        points: Points, shape ``(n, latent_dim)``.
+
+    Returns:
+        Points in the plane, shape ``(n, 2)``; ``points`` unchanged if
+        ``latent_dim == 2``.
+    """
+    if points.shape[-1] == 2:
+        return points
+    centered = points - points.mean(dim=0, keepdim=True)
+    _, _, v = torch.linalg.svd(centered, full_matrices=False)
+    return centered @ v[:2].T
 
 
 @torch.no_grad()
