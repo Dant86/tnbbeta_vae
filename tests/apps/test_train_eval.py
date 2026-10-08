@@ -14,6 +14,7 @@ from apps.eval import export_latents
 from apps.eval import main as eval_main
 from apps.train import main as train_main
 from tnbbeta_vae.data.cifar10 import Cifar10Images
+from tnbbeta_vae.data.dtd import DtdImages
 from tnbbeta_vae.data.mnist import MnistImages
 from tnbbeta_vae.training import load_model_checkpoint
 from tnbbeta_vae.training.device import (
@@ -35,6 +36,27 @@ def _fake_dataset(*_args: object, train: bool, **_kwargs: object) -> Cifar10Imag
     )
 
 
+class _FakeDtdBase:
+    """A tiny stand-in for torchvision's ``DTD``, with one category."""
+
+    classes = ["banded"]
+    class_to_idx = {"banded": 0}
+
+    def __init__(self, generator: torch.Generator) -> None:
+        self._images = [torch.rand(3, 64, 64, generator=generator) for _ in range(8)]
+
+    def __len__(self) -> int:
+        return len(self._images)
+
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, int]:
+        return self._images[index], 0
+
+
+def _fake_dtd(*_args: object, split: str, **_kwargs: object) -> DtdImages:
+    generator = torch.Generator().manual_seed(0 if split == "train" else 1)
+    return DtdImages(_FakeDtdBase(generator), categories=("banded",))
+
+
 @pytest.fixture(autouse=True)
 def _isolated_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
@@ -44,6 +66,7 @@ def _isolated_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(train_main, "load_cifar10", _fake_dataset)
     monkeypatch.setattr(eval_main, "load_cifar10", _fake_dataset)
     monkeypatch.setattr(export_latents, "load_cifar10", _fake_dataset)
+    monkeypatch.setattr(train_main, "load_dtd", _fake_dtd)
 
 
 def _train_args(model: str, extra: list[str], epochs: int) -> list[str]:
@@ -304,3 +327,55 @@ def test_patience_requires_a_validation_set() -> None:
         train_main.main(
             ["--model", "conv_gaussian_vae", "--patience", "3", "--run-name", "x"]
         )
+
+
+def test_dtd_patience_also_requires_a_validation_set() -> None:
+    with pytest.raises(SystemExit):
+        train_main.main(
+            [
+                "--model",
+                "conv_gaussian_vae",
+                "--dataset",
+                "dtd",
+                "--patience",
+                "3",
+                "--run-name",
+                "x",
+            ]  # fmt: skip
+        )
+
+
+@pytest.mark.parametrize(("model", "extra"), _MODELS)
+def test_train_dtd_sets_rgb_64_gaussian_defaults(
+    model: str, extra: list[str], tmp_path: Path
+) -> None:
+    train_main.main(
+        [
+            "--model",
+            model,
+            "--dataset",
+            "dtd",
+            "--set",
+            "latent_dim=4",
+            "--set",
+            "hidden_channels=8",
+            "--epochs",
+            "1",
+            "--batch-size",
+            "4",
+            "--num-workers",
+            "0",
+            "--device",
+            "cpu",
+            "--run-name",
+            "dtd_smoke",
+            *extra,
+        ]  # fmt: skip
+    )
+
+    checkpoints = tmp_path / "ckpt" / "dtd_smoke"
+    assert (checkpoints / "final.pt").exists()
+    final = torch.load(checkpoints / "final.pt")
+    assert final["config"]["image_channels"] == 3
+    assert final["config"]["image_size"] == 64
+    assert final["config"]["likelihood"] == "gaussian"
