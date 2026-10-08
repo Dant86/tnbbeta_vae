@@ -18,6 +18,7 @@ from tnbbeta_vae.models.heads import (
     head_size,
     posterior_from_raw,
     standard_prior,
+    tnbbeta_posterior,
 )
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
@@ -38,6 +39,12 @@ class MlpVAEConfig(BaseModel):
         latent_dim: Latent dimension (the sphere is ``S^(latent_dim - 1)``).
         likelihood_scale: Starting value of the learned Gaussian likelihood sigma.
         num_elbo_samples: ``z ~ q(z|x)`` draws averaged per ELBO estimate.
+        fixed_epsilon: If set, epsilon is held at this constant for every example
+            instead of being predicted by the encoder, removing one degree of
+            freedom from the posterior head's output. Meaningful only for
+            ``family="tnbbeta"``; ignored (not an error) for the other families,
+            mirroring ``ConvTNBBetaSphericalVAEConfig.fixed_epsilon``. ``None``
+            (default) keeps epsilon learned.
     """
 
     family: LatentFamily = "tnbbeta"
@@ -46,6 +53,7 @@ class MlpVAEConfig(BaseModel):
     latent_dim: int = 2
     likelihood_scale: float = 0.1
     num_elbo_samples: int = 1
+    fixed_epsilon: float | None = None
 
 
 @register_model("mlp_vae", config_cls=MlpVAEConfig)
@@ -61,9 +69,10 @@ class MlpVAE(nn.Module):
         super().__init__()
         self.config = config
         self.encoder = _mlp([config.input_dim, *config.hidden_dims])
-        self.posterior_head = nn.Linear(
-            config.hidden_dims[-1], head_size(config.family, config.latent_dim)
-        )
+        posterior_head_size = head_size(config.family, config.latent_dim)
+        if config.family == "tnbbeta" and config.fixed_epsilon is not None:
+            posterior_head_size -= 1
+        self.posterior_head = nn.Linear(config.hidden_dims[-1], posterior_head_size)
         self.decoder = nn.Sequential(
             _mlp([config.latent_dim, *reversed(config.hidden_dims)]),
             nn.Linear(config.hidden_dims[0], config.input_dim),
@@ -144,6 +153,10 @@ class MlpVAE(nn.Module):
 
     def _encode(self, x: Tensor) -> Distribution:
         raw = self.posterior_head(self.encoder(x))
+        if self.config.family == "tnbbeta":
+            return tnbbeta_posterior(
+                raw, self.config.latent_dim, fixed_epsilon=self.config.fixed_epsilon
+            )
         return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
 
     def _prior(self) -> Distribution:

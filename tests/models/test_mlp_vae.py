@@ -70,3 +70,80 @@ def test_supports_the_importance_weighted_metrics(family: str) -> None:
 
     assert all(torch.isfinite(value).all() for value in metrics.values())
     assert metrics["ll"].shape == (4,)
+
+
+def _tnbbeta_model(**overrides: object) -> MlpVAE:
+    return MlpVAE(
+        MlpVAEConfig(
+            family="tnbbeta",
+            latent_dim=4,
+            input_dim=12,
+            hidden_dims=[16, 8],
+            **overrides,  # pyright: ignore[reportArgumentType]
+        )
+    )
+
+
+def test_fixed_epsilon_shrinks_the_posterior_head_and_holds_epsilon_constant() -> None:
+    torch.manual_seed(0)
+    model = _tnbbeta_model(fixed_epsilon=0.5)
+    default_model = _tnbbeta_model()
+
+    assert (
+        model.posterior_head.out_features
+        == default_model.posterior_head.out_features - 1
+    )
+    x = torch.randn(5, 12)
+    posterior = model._encode(x)
+
+    assert torch.equal(posterior.epsilon, torch.full((5,), 0.5))  # pyright: ignore[reportAttributeAccessIssue]
+    assert not posterior.epsilon.requires_grad  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_fixed_epsilon_trains_with_finite_gradients_everywhere() -> None:
+    torch.manual_seed(0)
+    model = _tnbbeta_model(fixed_epsilon=1.0)
+    x = torch.randn(6, 12)
+
+    out = model.training_step(x)
+    out["loss"].backward()
+
+    assert torch.isfinite(out["loss"])
+    assert all(
+        p.grad is None or torch.isfinite(p.grad).all() for p in model.parameters()
+    )
+    assert all(p.grad is not None for p in model.posterior_head.parameters())
+
+
+def test_default_config_keeps_epsilon_learned() -> None:
+    torch.manual_seed(0)
+    model = _tnbbeta_model()
+    x = torch.randn(5, 12)
+
+    posterior = model._encode(x)
+
+    assert model.config.fixed_epsilon is None
+    assert len(posterior.epsilon.unique()) > 1  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def test_fixed_epsilon_is_ignored_for_non_tnbbeta_families() -> None:
+    """``fixed_epsilon`` only matters for ``tnbbeta``; elsewhere it's a no-op."""
+    torch.manual_seed(0)
+    plain_model = _model("vmf", latent_dim=4)
+    model_with_fixed_epsilon = MlpVAE(
+        MlpVAEConfig(
+            family="vmf",
+            latent_dim=4,
+            input_dim=12,
+            hidden_dims=[16, 8],
+            fixed_epsilon=0.5,
+        )
+    )
+    x = torch.randn(5, 12)
+
+    assert (
+        model_with_fixed_epsilon.posterior_head.out_features
+        == plain_model.posterior_head.out_features
+    )
+    out = model_with_fixed_epsilon.training_step(x)
+    assert torch.isfinite(out["loss"])
