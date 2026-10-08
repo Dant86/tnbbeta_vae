@@ -105,3 +105,55 @@ def test_experiment_only_runs_the_requested_families(tmp_path: Path) -> None:
 
     results = json.loads((tmp_path / "out" / "sbm_recovery.json").read_text())
     assert set(results) == {"gaussian", "tnbbeta"}
+
+
+def test_graph_and_split_use_graph_seed_not_the_per_run_training_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SBM graph/split are generated once from ``--graph-seed``, independent of
+    ``--seed`` (which only seeds model init/training, like ``run_once`` already
+    does) -- so a seed sweep for the TNBBeta-stability check trains on the exact
+    same graph and edge split every time, varying only initialization/negative
+    sampling, not the task itself.
+    """
+    seen_seeds: list[int] = []
+    real_sbm = sbm_recovery.stochastic_block_model
+
+    def _spy(**kwargs: object) -> object:
+        seen_seeds.append(kwargs["seed"])  # type: ignore[arg-type]
+        return real_sbm(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sbm_recovery, "stochastic_block_model", _spy)
+
+    sbm_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--num-communities",
+            "3",
+            "--nodes-per-community",
+            "10",
+            "--p-in",
+            "0.6",
+            "--p-out",
+            "0.05",
+            "--latent-dim",
+            "4",
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "2",
+            "--seed",
+            "7",
+            "--graph-seed",
+            "123",
+            "--device",
+            "cpu",
+            "--run-name",
+            "sbm_recovery_smoke3",
+            "--families",
+            "gaussian",
+        ]  # fmt: skip
+    )
+
+    assert seen_seeds == [123]

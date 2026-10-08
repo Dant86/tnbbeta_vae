@@ -4,7 +4,7 @@ Usage:
     uv run python -m apps.synthetic.sbm_recovery [--out-dir DIR] \
         [--num-communities 10] [--nodes-per-community 50] \
         [--p-in 0.3] [--p-out 0.01] [--latent-dim 16] [--epochs 200] \
-        [--seed 0] [--run-name sbm_recovery] \
+        [--graph-seed 0] [--seed 0] [--run-name sbm_recovery] \
         [--families gaussian vmf power_spherical tnbbeta]
 
 This project's research has found ``TNBBetaSpherical``'s posterior goes genuinely
@@ -102,7 +102,23 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--test-fraction", type=float, default=0.10)
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--lr", type=float, default=0.01)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--graph-seed",
+        type=int,
+        default=0,
+        help=(
+            "Seed for the SBM graph's edge sampling and its val/test edge split --"
+            " generated once and shared across every --seed in a stability sweep, so"
+            " a seed sweep varies only model init/negative sampling (via run_once's"
+            " own seed), not the task (the graph and split) itself."
+        ),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="Model init/negative-sampling seed, passed straight to run_once.",
+    )
     parser.add_argument(
         "--run-name",
         type=str,
@@ -128,13 +144,13 @@ def main(argv: list[str] | None = None) -> None:
         nodes_per_community=args.nodes_per_community,
         p_in=args.p_in,
         p_out=args.p_out,
-        seed=args.seed,
+        seed=args.graph_seed,
     )
     split = split_edges(
         graph.adjacency,
         val_fraction=args.val_fraction,
         test_fraction=args.test_fraction,
-        seed=args.seed,
+        seed=args.graph_seed,
     )
 
     results: dict[str, Any] = {}
