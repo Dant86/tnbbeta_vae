@@ -12,6 +12,7 @@ import torch
 
 from apps.eval import graph_posterior_shape
 from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
+from tnbbeta_vae.data.stochastic_block_model import stochastic_block_model
 from tnbbeta_vae.models import GraphVAE, GraphVAEConfig
 
 
@@ -93,3 +94,23 @@ def test_omits_tnbbeta_fields_for_vmf(tmp_path: Path) -> None:
     stats = json.loads(output.read_text())["posterior_stats"]
     assert "p_mean" not in stats
     assert "entropy_mean" in stats
+
+
+def test_graph_to_batch_handles_a_synthetic_graph_with_sparse_identity_features() -> (
+    None
+):
+    """``graph_to_batch`` plugs a non-dataset-dispatch ``Graph`` in directly.
+
+    Exercises the reuse path ``apps/synthetic/sbm_recovery.py`` depends on: a
+    ``Graph``-shaped object with torch.sparse identity features that never goes
+    through ``_load_batch``'s dataset-name dispatch at all.
+    """
+    graph = stochastic_block_model(
+        num_communities=3, nodes_per_community=4, p_in=0.5, p_out=0.05, seed=0
+    )
+
+    batch = graph_posterior_shape.graph_to_batch(graph, torch.device("cpu"))
+
+    assert batch.num_nodes == 12
+    assert batch.features.shape == (12, 12)
+    assert batch.positive_edges.shape == (2, 0)

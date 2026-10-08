@@ -20,6 +20,12 @@ every node in the graph, with no bridge/non-bridge or community split -- so it a
 runs on Cora/Citeseer/Pubmed, which have no community labels to split on.
 
 Writes ``posterior_shape_<checkpoint>.json`` next to the checkpoint.
+
+:func:`graph_to_batch` -- the "build a ``GraphBatch`` from a ``Graph`` object" step --
+is factored out as a public function (not just this module's dataset dispatch) so
+other scripts that already have a ``Graph`` in hand, e.g.
+``apps/synthetic/sbm_recovery.py``'s synthetic stochastic-block-model graph, can reuse
+it directly instead of duplicating the sparse/dense-features handling a third time.
 """
 
 from __future__ import annotations
@@ -36,11 +42,15 @@ from tnbbeta_vae.data.planetoid import (
     load_planetoid,
     normalized_adjacency,
 )
+from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
 from tnbbeta_vae.data.snap_community import SNAP_COMMUNITY_DATASETS, load_snap_community
+from tnbbeta_vae.data.snap_community import Graph as SnapGraph
 from tnbbeta_vae.models import GraphBatch
 from tnbbeta_vae.models.posterior_stats import posterior_stats
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import load_model_checkpoint
+
+__all__ = ["graph_to_batch", "main"]
 
 _DATASETS = (*PLANETOID_DATASETS, *SNAP_COMMUNITY_DATASETS)
 
@@ -87,14 +97,30 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Wrote {output}")
 
 
-def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
-    """Loads the whole graph (no train/val/test split -- this only needs a forward
-    pass through the encoder, not link prediction) as a :class:`GraphBatch`."""
-    if dataset in PLANETOID_DATASETS:
-        graph = load_planetoid(data_dir() / "planetoid", dataset)
-    else:
-        graph = load_snap_community(data_dir() / "snap_community", dataset)
+def graph_to_batch(
+    graph: PlanetoidGraph | SnapGraph, device: torch.device
+) -> GraphBatch:
+    """Builds the whole-graph :class:`GraphBatch` for a forward pass (no split).
 
+    No train/val/test split is applied -- this only needs a forward pass through the
+    encoder, not link prediction (``positive_edges`` is left empty, since
+    ``posterior_and_prior`` never reads it). Handles both scipy.sparse features
+    (Planetoid, densified for ``GraphVAE.posterior_and_prior``'s dense-features
+    branch) and torch.sparse identity features (SNAP community graphs and the
+    synthetic stochastic-block-model graph, kept sparse), exactly as
+    ``apps/link_prediction/main.py``'s ``run_once`` and this module's own
+    :func:`_load_batch` dispatch on the same duck-typed distinction.
+
+    Args:
+        graph: Any ``Graph``-shaped object with ``.adjacency`` (scipy.sparse) and
+            ``.features`` (scipy.sparse or torch tensor) -- Planetoid, SNAP community,
+            or a synthetic graph built the same way (e.g.
+            ``tnbbeta_vae.data.stochastic_block_model.stochastic_block_model``).
+        device: Device to move the batch to.
+
+    Returns:
+        A :class:`GraphBatch` with an empty ``positive_edges``.
+    """
     features = graph.features
     if hasattr(features, "tocoo"):
         # scipy.sparse matrix (Planetoid): convert to dense for backward compatibility
@@ -103,7 +129,8 @@ def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
             cast("Any", features).toarray(), dtype=torch.float32
         )
     else:
-        # Already a torch tensor (torch.sparse identity features, SNAP graphs).
+        # Already a torch tensor (torch.sparse identity features, SNAP/synthetic
+        # graphs).
         features_tensor = cast("torch.Tensor", features).to(dtype=torch.float32)
 
     return GraphBatch(
@@ -113,6 +140,17 @@ def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
         # training/scoring path does, which this script doesn't run.
         positive_edges=torch.zeros((2, 0), dtype=torch.long),
     ).to(device)
+
+
+def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
+    """Loads a named dataset (Planetoid or SNAP community) as a :class:`GraphBatch`."""
+    if dataset in PLANETOID_DATASETS:
+        graph: PlanetoidGraph | SnapGraph = load_planetoid(
+            data_dir() / "planetoid", dataset
+        )
+    else:
+        graph = load_snap_community(data_dir() / "snap_community", dataset)
+    return graph_to_batch(graph, device)
 
 
 if __name__ == "__main__":
