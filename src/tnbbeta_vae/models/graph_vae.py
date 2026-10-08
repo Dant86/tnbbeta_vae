@@ -26,6 +26,7 @@ from tnbbeta_vae.models.heads import (
     posterior_from_raw,
     standard_prior,
 )
+from tnbbeta_vae.models.pairwise import pairwise_logits
 from tnbbeta_vae.registry import register_model
 
 __all__ = ["GraphBatch", "GraphVAE", "GraphVAEConfig"]
@@ -182,10 +183,7 @@ class GraphVAE(nn.Module):
         Returns:
             Inner products, times the temperature for the sphere families.
         """
-        inner = (z[edges[0]] * z[edges[1]]).sum(-1)
-        if self.config.family == "gaussian":
-            return inner
-        return self.temperature() * inner
+        return pairwise_logits(z, edges, self.config.family, self.temperature())
 
     def temperature(self) -> Tensor:
         """Returns the multiplier applied to inner products of unit vectors."""

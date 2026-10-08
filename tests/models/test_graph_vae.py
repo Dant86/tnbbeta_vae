@@ -83,6 +83,19 @@ def test_training_step_gradients_and_embeddings(family: Any) -> None:
         assert torch.allclose(embeddings.norm(dim=-1), torch.ones(120), atol=1e-4)
 
 
+def test_log_temperature_stays_a_top_level_state_dict_key() -> None:
+    """Pins GraphVAE's state_dict shape so existing checkpoints keep loading.
+
+    ``log_temperature`` is a top-level ``nn.Parameter`` baked into every
+    real cluster checkpoint's ``state_dict`` (see CLAUDE.md). Extracting
+    ``link_logits``'s formula into ``pairwise_logits`` must not move or
+    rename it -- this guards against that regression specifically.
+    """
+    model = GraphVAE(GraphVAEConfig(family="vmf", in_features=6, latent_dim=4))
+
+    assert "log_temperature" in model.state_dict()
+
+
 def test_temperature_is_learned_by_default_and_fixed_when_given() -> None:
     learned = GraphVAE(GraphVAEConfig(family="vmf", in_features=6, latent_dim=4))
     fixed = GraphVAE(
