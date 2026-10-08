@@ -1,10 +1,13 @@
 """DTD (Describable Textures Dataset) image loading via ``torchvision``.
 
-Filtered, by default, to the oriented-texture category subset this project
-trains on -- see
+Filtered, by default, to the oriented-texture candidate categories from
 ``docs/superpowers/specs/2026-10-07-axial-bimodality-datasets-design.md``
-(Part 2) and ``apps/data/curate_dtd_categories.py``, which measured the
-structure-tensor coherence that decided ``ORIENTED_CATEGORIES``.
+(Part 2). ``ORIENTED_CATEGORIES`` below is still the full 10-candidate list,
+not yet narrowed -- the design doc's own filter (measuring each candidate's
+real structure-tensor coherence) needs real downloaded images to run against,
+so it's deliberately left to ``apps/data/curate_dtd_categories.py``, a tool
+to run yourself once DTD is downloaded (e.g. on the cluster), not something
+decided here in advance.
 """
 
 from __future__ import annotations
@@ -23,9 +26,10 @@ __all__ = ["DtdImages", "ORIENTED_CATEGORIES", "load_dtd"]
 
 # Candidate axial (no head/tail, orientation defined mod pi) texture categories --
 # docs/superpowers/specs/2026-10-07-axial-bimodality-datasets-design.md Part 2.
-# Placeholder: apps/data/curate_dtd_categories.py measures real structure-tensor
-# coherence per candidate and this gets narrowed to the decided subset afterward
-# (see that script's commit message for the numbers behind the final cut).
+# The FULL candidate list, not yet curated: run
+# `uv run python -m apps.data.curate_dtd_categories` against real, downloaded
+# DTD images to measure each candidate's actual structure-tensor coherence and
+# narrow this down for your own training runs.
 ORIENTED_CATEGORIES: tuple[str, ...] = (
     "banded",
     "braided",
