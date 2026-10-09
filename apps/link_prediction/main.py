@@ -9,15 +9,18 @@ overlapping ground-truth communities at once).
 Usage:
     uv run python -m apps.link_prediction.main --dataset cora --family tnbbeta \
         [--lrs 0.01 0.005 0.001] [--dropouts 0 0.2 0.4] [--latent-dims 16 32 64] \
-        [--epochs 200] [--seeds 0 1 2 3 4]
+        [--epochs 200] [--seeds 0 1 2 3 4] [--ignore-features]
 
 Trains a GCN variational graph auto-encoder (:class:`GraphVAE`) with a Gaussian, vMF or
 TNBBeta latent. Every configuration in the grid is run for each seed on a fresh 85/5/10
 edge split; within a run the epoch with the best validation AUC is selected and its test
 AUC and average precision are recorded. The configuration with the best mean validation
 AUC is the reported one. Writes ``$TNBBETA_CHECKPOINT_DIR/link_prediction/
-<dataset>_<family>.json`` with the selected configuration's test mean and standard
-deviation and a summary of every configuration.
+<label>_<family>.json`` with the selected configuration's test mean and standard
+deviation and a summary of every configuration, where ``<label>`` is ``<dataset>`` or,
+with ``--ignore-features``, ``<dataset>_nofeat`` -- isolating whether the encoder sees
+a dataset's real node features or an identity matrix (matching com-DBLP's own
+featureless convention) as its own controlled variable, independent of ``--dataset``.
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ from tnbbeta_vae.data.planetoid import (
     split_edges,
 )
 from tnbbeta_vae.data.snap_community import Graph as SnapGraph
-from tnbbeta_vae.data.snap_community import load_snap_community
+from tnbbeta_vae.data.snap_community import identity_features, load_snap_community
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
@@ -77,6 +80,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--fixed-temperature", type=float, default=None)
     parser.add_argument("--feature-reconstruction-weight", type=float, default=0.0)
+    parser.add_argument(
+        "--ignore-features",
+        action="store_true",
+        help="Replace the loaded graph's real features with an identity matrix "
+        "(matching com-DBLP's own featureless convention) before the grid search, "
+        "isolating 'features present vs. absent' as its own controlled variable. "
+        "Output paths and checkpoints use '<dataset>_nofeat' instead of '<dataset>' "
+        "so a features-off run never collides with its features-on counterpart.",
+    )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument(
         "--run-name",
@@ -111,6 +123,9 @@ def main(argv: list[str] | None = None) -> None:
         graph = load_snap_community(data_dir() / "snap_community", "dblp")
     else:
         graph = load_planetoid(data_dir() / "planetoid", args.dataset)
+    if args.ignore_features:
+        graph.features = identity_features(graph.features.shape[0])
+    label = f"{args.dataset}_nofeat" if args.ignore_features else args.dataset
     splits = {seed: split_edges(graph.adjacency, seed=seed) for seed in args.seeds}
 
     summaries: list[dict[str, Any]] = []
@@ -155,7 +170,7 @@ def main(argv: list[str] | None = None) -> None:
         "selected": selected,
         "configurations": summaries,
     }
-    output = checkpoint_dir() / "link_prediction" / f"{args.dataset}_{args.family}.json"
+    output = checkpoint_dir() / "link_prediction" / f"{label}_{args.family}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2))
     print(f"Selected {json.dumps(selected)}\nWrote {output}")
