@@ -3,7 +3,17 @@
 Usage:
     uv run python -m apps.eval.graph_posterior_shape --run-name NAME \
         --dataset cora|citeseer|pubmed|dblp|amazon|mag_cs|mag_eng|mag_chem|mag_med \
-        [--checkpoint final] [--device cpu]
+        [--checkpoint final] [--device cpu] [--ignore-features]
+
+``--ignore-features`` rebuilds the batch with an identity feature matrix instead of
+``--dataset``'s real features -- for a checkpoint trained with
+``apps.link_prediction.main --ignore-features``, which needs the identical kind of
+batch (identity features) at eval time to match what it actually saw during training.
+``--dataset`` still names the real graph topology to load (e.g. ``cora``); only
+``.features`` is overridden. ``--run-name`` is unaffected: it's whatever the training
+run was named (e.g. a run trained with ``--ignore-features --run-name
+cora_nofeat_tnbbeta`` produces checkpoints at ``cora_nofeat_tnbbeta_seed<N>``), so this
+script doesn't derive it -- it just needs this flag to reconstruct the matching batch.
 
 ``apps.eval.dblp_bridge_diagnostic``'s corrected shape diagnostic found that *every*
 com-DBLP node, bridge or not, sits in TNBBeta's proven bimodal regime (``m =
@@ -45,7 +55,11 @@ from tnbbeta_vae.data.planetoid import (
     normalized_adjacency,
 )
 from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
-from tnbbeta_vae.data.snap_community import SNAP_COMMUNITY_DATASETS, load_snap_community
+from tnbbeta_vae.data.snap_community import (
+    SNAP_COMMUNITY_DATASETS,
+    identity_features,
+    load_snap_community,
+)
 from tnbbeta_vae.data.snap_community import Graph as SnapGraph
 from tnbbeta_vae.models import GraphBatch
 from tnbbeta_vae.models.posterior_stats import posterior_stats
@@ -72,6 +86,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--dataset", required=True, choices=list(_DATASETS))
     parser.add_argument("--checkpoint", default="final", choices=["final", "latest"])
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--ignore-features",
+        action="store_true",
+        help="Rebuild the batch with identity features instead of --dataset's real "
+        "features, matching a checkpoint trained with "
+        "apps.link_prediction.main --ignore-features.",
+    )
     args = parser.parse_args(argv)
 
     device = torch.device(
@@ -79,7 +100,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     run_dir = checkpoint_dir() / args.run_name
     model, checkpoint = load_model_checkpoint(run_dir / f"{args.checkpoint}.pt", device)
-    batch = _load_batch(args.dataset, device)
+    batch = _load_batch(args.dataset, device, ignore_features=args.ignore_features)
 
     model.eval()
     with torch.no_grad():
@@ -148,9 +169,20 @@ def graph_to_batch(
     ).to(device)
 
 
-def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
+def _load_batch(
+    dataset: str, device: torch.device, *, ignore_features: bool = False
+) -> GraphBatch:
     """Loads a named dataset (Planetoid, SNAP community or MAG co-authorship) as a
-    :class:`GraphBatch`."""
+    :class:`GraphBatch`.
+
+    Args:
+        dataset: The real graph topology to load, e.g. ``"cora"``.
+        device: Device to move the batch to.
+        ignore_features: If true, overrides the loaded graph's ``.features`` with an
+            identity matrix before building the batch -- mirroring
+            ``apps/link_prediction/main.py --ignore-features`` exactly, so a
+            checkpoint trained that way gets the same kind of batch at eval time.
+    """
     if dataset in PLANETOID_DATASETS:
         graph: PlanetoidGraph | SnapGraph = load_planetoid(
             data_dir() / "planetoid", dataset
@@ -161,6 +193,8 @@ def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
         )
     else:
         graph = load_snap_community(data_dir() / "snap_community", dataset)
+    if ignore_features:
+        graph.features = identity_features(graph.features.shape[0])
     return graph_to_batch(graph, device)
 
 
