@@ -51,6 +51,7 @@
   """Ad hoc: correlates per-node neighbor-heterogeneity against TNBBeta's m on the
   SBM dose-response checkpoints. Not a committed script -- see this write-up for
   why."""
+
   from __future__ import annotations
 
   import json
