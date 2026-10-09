@@ -160,6 +160,85 @@ def test_graph_and_split_use_graph_seed_not_the_per_run_training_seed(
     assert seen_seeds == [123]
 
 
+def test_feature_noise_std_omitted_passes_none_to_stochastic_block_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Additive-only regression: not passing the new flag must leave the graph
+    builder's ``feature_noise_std`` at its ``None`` default, unchanged."""
+    seen_feature_noise_std: list[object] = []
+    real_sbm = sbm_recovery.stochastic_block_model
+
+    def _spy(**kwargs: object) -> object:
+        seen_feature_noise_std.append(kwargs.get("feature_noise_std"))
+        return real_sbm(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(sbm_recovery, "stochastic_block_model", _spy)
+
+    sbm_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--num-communities",
+            "3",
+            "--nodes-per-community",
+            "10",
+            "--latent-dim",
+            "4",
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "1",
+            "--device",
+            "cpu",
+            "--run-name",
+            "sbm_recovery_nofeaturenoise_spy",
+            "--families",
+            "gaussian",
+        ]  # fmt: skip
+    )
+
+    assert seen_feature_noise_std == [None]
+
+
+def test_feature_noise_std_flag_is_passed_through_and_trains_on_dense_features(
+    tmp_path: Path,
+) -> None:
+    """``--feature-noise-std`` actually reaches ``stochastic_block_model`` (dense,
+    noisy one-hot-community features, not the default sparse identity) and the whole
+    pipeline still runs end to end on top of it."""
+    sbm_recovery.main(
+        [
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--num-communities",
+            "3",
+            "--nodes-per-community",
+            "10",
+            "--latent-dim",
+            "4",
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "3",
+            "--device",
+            "cpu",
+            "--run-name",
+            "sbm_recovery_featurenoise_smoke",
+            "--families",
+            "gaussian",
+            "tnbbeta",
+            "--feature-noise-std",
+            "0.5",
+        ]  # fmt: skip
+    )
+
+    results = json.loads((tmp_path / "out" / "sbm_recovery.json").read_text())
+    assert set(results) == {"gaussian", "tnbbeta"}
+    for metrics in results.values():
+        assert "no_checkpoint" not in metrics
+        assert math.isfinite(metrics["test_auc"])
+
+
 def test_no_aggregation_runs_for_all_four_families_and_writes_expected_keys(
     tmp_path: Path,
 ) -> None:
