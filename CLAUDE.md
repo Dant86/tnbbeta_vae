@@ -85,15 +85,84 @@ automatically on commit, excluding `notebooks/`.
   encoder/decoder, a 50k/10k train/val split, per-epoch validation, KL warm-up and early
   stopping (`Trainer`); `final.pt` is then the best-validation epoch, not the last.
 - `models/mlp_vae.py` (vectors), `models/graph_vae.py` (link prediction) and
-  `models/semi_supervised.py` (M1+M2) take a latent `family` of `gaussian`, `vmf` or
-  `tnbbeta`; the posterior heads, priors and centres live in `models/heads.py`
-  (`posterior_from_raw`, `standard_prior`, `posterior_centre`), so a new family or model
-  should reuse them instead of copying. Entry points pick their device with
-  `tnbbeta_vae.training.select_device`, which exits with code 75 on a GPU-less node so
-  the sbatch scripts can resubmit (`scripts/slurm/no_gpu_retry.sh`).
+  `models/semi_supervised.py` (M1+M2) take a latent `family` of `gaussian`, `vmf`,
+  `power_spherical` or `tnbbeta`; the posterior heads, priors and centres live in
+  `models/heads.py` (`posterior_from_raw`, `standard_prior`, `posterior_centre`), so a
+  new family or model should reuse them instead of copying. Entry points pick their
+  device with `tnbbeta_vae.training.select_device`, which exits with code 75 on a
+  GPU-less node so the sbatch scripts can resubmit (`scripts/slurm/no_gpu_retry.sh`).
+- `models/graph_vae.py`'s `GraphVAE` decoder is *just* the dot product (`link_logits`,
+  factored into the stateless `models/pairwise.py::pairwise_logits` so other models can
+  reuse the same scoring formula): `sigmoid(temperature * (z_i . z_j))` for the sphere
+  families (`temperature` a single learned scalar shared across every node -- the only
+  per-node substitute for the free per-node norm an unconstrained Gaussian embedding
+  gets from an unbounded dot product; see the bimodality investigation below), plain
+  `z_i . z_j` for Gaussian. `GraphVAEConfig.feature_reconstruction_weight` (default
+  `0.0`, meaning no decoder exists at all) is an ablation knob, not a feature to build
+  on casually: it was added specifically to test whether adding a reconstruction term
+  changes TNBBeta's posterior shape, and its decoder submodule is constructed only when
+  the weight is `> 0`, so default-config checkpoints keep their exact pre-existing
+  `state_dict` shape -- do not change that invariant without re-checking it against
+  real cluster checkpoints (`tests/models/test_graph_vae.py`'s state_dict-key
+  regression test exists exactly for this). `apps/link_prediction/main.py`'s
+  `run_once` similarly has an additive-only `encoder_adjacency` override (lets the
+  GCN's aggregation input differ from the real training graph, for isolating
+  aggregation itself) -- same "default must reproduce prior behavior exactly" rule.
+- `models/posterior_stats.py::posterior_stats` (entropy/concentration for any family;
+  TNBBeta's own `p`/`q`/`epsilon`/`m = epsilon - (latent_dim-1)/2`/`frac_bimodal`,
+  where `m < 0` is the proven-necessary-and-sufficient bimodality condition from
+  `tnbbeta_vs_power_spherical_expressivity.md`) is shared by
+  `apps/eval/dblp_bridge_diagnostic.py` (bridge-node-specific) and
+  `apps/eval/graph_posterior_shape.py` (whole-graph, dataset-agnostic -- works on any
+  `GraphVAE` checkpoint, Planetoid/SNAP community/MAG co-authorship alike). Reuse this
+  rather than recomputing p/q/epsilon/m a third time.
 - The Gaussian likelihood scale sigma is always learned (`LearnedLikelihoodScale`, log
   sigma^2); `likelihood_scale` in each model config is only its starting value. Do not
   add a fixed-sigma option back: it made results depend on a hand-picked number.
+- `tnbbeta_vae.data.axial_mixture` (and `apps/synthetic/axial_recovery.py`) is a
+  sibling of `circle_mixture.py`/`circle_recovery.py`: a synthetic task where the true
+  angle is drawn from a 50/50 *antipodal* von Mises mixture, observed through an
+  embedding exactly invariant under `phi -> phi + pi`, so the Bayes-optimal posterior
+  is provably bimodal -- a minimal proof-of-concept for `TNBBetaSpherical`'s
+  antipodal-bimodality capability
+  (`docs/superpowers/specs/2026-10-07-axial-bimodality-datasets-design.md`). Free
+  training does not find the bimodal regime on it (same collapse as MNIST); forcing it
+  via `MlpVAEConfig.fixed_epsilon` (mirrors `GraphVAEConfig`'s `fixed_temperature`
+  pattern) doesn't help either, since the task's decoder is exactly sign-invariant and
+  rewards no reconstruction benefit for splitting mass across both modes --
+  see `writeup/results/axial_mixture_recovery_2026-10-07.md` and its `latent_dim=5`
+  follow-up.
+- `tnbbeta_vae.data.dtd` (DTD oriented textures -- `apps/data/download_dtd.py`,
+  `apps/data/curate_dtd_categories.py`, `apps/eval/dtd_orientation_probe.py`) is the
+  real-data counterpart to `axial_mixture`: texture categories with a genuine,
+  no-head/tail dominant line orientation (defined mod `pi`). Orientation/coherence
+  ground truth for evaluation only (never training) comes from
+  `tnbbeta_vae.data.orientation.structure_tensor_orientation`, a general structure-
+  tensor function, not DTD-specific. `ORIENTED_CATEGORIES` is deliberately the full,
+  *uncurated* candidate list -- `curate_dtd_categories.py` is a tool for whoever runs
+  it (on real downloaded data, e.g. on the cluster) to pick the final subset from real
+  measured coherence, not something decided in source ahead of time.
+- **The TNBBeta-bimodality investigation**
+  (`writeup/results/graph_bimodality_investigation_summary_2026-10-08.md` is the
+  narrative entry point; read it before touching any of the modules below).
+  `TNBBetaSpherical`'s bimodality (`m < 0`) shows up reliably on real `GraphVAE`
+  link-prediction runs (Cora/Citeseer/Pubmed/com-DBLP) and not on any reconstruction
+  task tried. Three synthetic ablations (each its own dated `writeup/results/` entry)
+  isolate the mechanism: `models/pairwise_mlp_vae.py` + `data/cluster_mixture.py`
+  (the exact `GraphVAE` loss, no graph, plain MLP -- stays unimodal);
+  `GraphVAEConfig.feature_reconstruction_weight` on real Cora (adding reconstruction
+  back -- barely moves it); `data/stochastic_block_model.py` +
+  `apps/synthetic/sbm_recovery.py` (a synthetic graph through `GraphVAE`'s real,
+  unmodified GCN -- reproduces bimodality, *more* so than real Cora, at 1/634th
+  com-DBLP's scale). Triangulated conclusion: GCN aggregation over community-
+  correlated structure is sufficient, independent of scale/features/decoder presence;
+  the exact mechanistic "why" remains open. `tnbbeta_vae.data.mag_coauthor` (the NOCD
+  paper's Microsoft Academic Graph co-authorship networks, `mag_cs`/`mag_eng`/
+  `mag_chem`/`mag_med` -- genuine overlapping research-area communities *with* real
+  keyword features, unlike com-DBLP) and `scripts/slurm/link_prediction.sbatch`'s
+  per-family `d`/`d+1` dimension sweep are the next, broader empirical step, not yet
+  run (`writeup/results/dimension_sweep_and_mag_coauthor_infra_2026-10-09.md` is
+  infrastructure-only, no results yet).
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
   `training_step`, not in `Trainer`. It also writes/reads checkpoints
