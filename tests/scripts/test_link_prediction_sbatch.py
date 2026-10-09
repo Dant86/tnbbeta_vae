@@ -1,4 +1,10 @@
-"""Tests for scripts/slurm/link_prediction.sbatch, using a stub uv."""
+"""Tests for scripts/slurm/link_prediction.sbatch, using a stub uv.
+
+Covers the dimension-sweep convention (CLAUDE.md's "Sphere models' latent_dim is the
+AMBIENT dimension" note, mirrored from scripts/slurm/mnist_sweep.sbatch): the Gaussian
+family's --latent-dims are the manifold dims directly, and every sphere family
+(vmf, tnbbeta, power_spherical) gets each dim + 1.
+"""
 
 from __future__ import annotations
 
@@ -12,16 +18,19 @@ _REPO = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize(
-    ("task", "dataset", "family"),
+    ("task", "dataset", "family", "latent_dims"),
     [
-        (0, "cora", "gaussian"),
-        (2, "cora", "tnbbeta"),
-        (4, "citeseer", "vmf"),
-        (8, "pubmed", "tnbbeta"),
+        (0, "cora", "gaussian", "16 32 64"),
+        (1, "cora", "vmf", "17 33 65"),
+        (2, "cora", "tnbbeta", "17 33 65"),
+        (3, "cora", "power_spherical", "17 33 65"),
+        (4, "citeseer", "gaussian", "16 32 64"),
+        (9, "pubmed", "vmf", "17 33 65"),
+        (11, "pubmed", "power_spherical", "17 33 65"),
     ],
 )
-def test_sweep_script_maps_array_index_to_dataset_and_family(
-    tmp_path: Path, task: int, dataset: str, family: str
+def test_sweep_script_maps_array_index_to_dataset_family_and_dimension_convention(
+    tmp_path: Path, task: int, dataset: str, family: str, latent_dims: str
 ) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -45,10 +54,10 @@ def test_sweep_script_maps_array_index_to_dataset_and_family(
     )
 
     assert result.returncode == 0, result.stderr
-    assert (
-        log.read_text()
-        .strip()
-        .endswith(f"apps.link_prediction.main --dataset {dataset} --family {family}")
+    call = log.read_text().strip()
+    assert call.endswith(
+        f"apps.link_prediction.main --dataset {dataset} --family {family} "
+        f"--latent-dims {latent_dims}"
     )
 
 
