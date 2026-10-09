@@ -1,7 +1,10 @@
 """Link prediction on citation and co-authorship graphs.
 
-Supports Planetoid citation graphs (S-VAE paper, Table 4) and SNAP community graphs
-(co-authorship networks like com-DBLP with documented overlapping communities).
+Supports Planetoid citation graphs (S-VAE paper, Table 4), SNAP community graphs
+(co-authorship networks like com-DBLP with documented overlapping communities but no
+real features) and the NOCD paper's MAG co-authorship networks (``mag_cs``,
+``mag_eng``, ``mag_chem``, ``mag_med`` -- real bag-of-keyword features AND genuine
+overlapping ground-truth communities at once).
 
 Usage:
     uv run python -m apps.link_prediction.main --dataset cora --family tnbbeta \
@@ -29,9 +32,11 @@ import numpy as np
 import scipy.sparse as sp
 import torch
 
+from tnbbeta_vae.data.mag_coauthor import MAG_COAUTHOR_DATASETS, load_mag_coauthor
 from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
 from tnbbeta_vae.data.planetoid import (
     LinkSplit,
+    SparseMatrix,
     load_planetoid,
     normalized_adjacency,
     split_edges,
@@ -43,7 +48,13 @@ from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import select_device
 
-_DEFAULT_EPOCHS = {"cora": 200, "citeseer": 200, "pubmed": 400, "dblp": 50}
+_DEFAULT_EPOCHS = {
+    "cora": 200,
+    "citeseer": 200,
+    "pubmed": 400,
+    "dblp": 50,
+    **{f"mag_{name}": 200 for name in MAG_COAUTHOR_DATASETS},
+}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -65,6 +76,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     parser.add_argument("--fixed-temperature", type=float, default=None)
+    parser.add_argument("--feature-reconstruction-weight", type=float, default=0.0)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument(
         "--run-name",
@@ -90,8 +102,12 @@ def main(argv: list[str] | None = None) -> None:
             "need every configuration's checkpoint.",
             file=sys.stderr,
         )
-    # Load from Planetoid or SNAP community dataset.
-    if args.dataset == "dblp":
+    # Load from Planetoid, SNAP community or MAG co-authorship dataset.
+    if args.dataset.startswith("mag_"):
+        graph = load_mag_coauthor(
+            data_dir() / "mag_coauthor", args.dataset.removeprefix("mag_")
+        )
+    elif args.dataset == "dblp":
         graph = load_snap_community(data_dir() / "snap_community", "dblp")
     else:
         graph = load_planetoid(data_dir() / "planetoid", args.dataset)
@@ -111,6 +127,7 @@ def main(argv: list[str] | None = None) -> None:
                     latent_dim=latent_dim,
                     dropout=dropout,
                     fixed_temperature=args.fixed_temperature,
+                    feature_reconstruction_weight=args.feature_reconstruction_weight,
                 ),
                 lr=lr,
                 epochs=epochs,
@@ -154,6 +171,7 @@ def run_once(
     seed: int,
     device: torch.device,
     run_name: str | None = None,
+    encoder_adjacency: SparseMatrix | None = None,
 ) -> dict[str, float]:
     """Trains one model and returns the metrics at its best-validation epoch.
 
@@ -171,6 +189,20 @@ def run_once(
             :func:`~tnbbeta_vae.training.load_model_checkpoint` and the ``apps.eval``
             scripts can read it). Not saved if ``None`` (the default, preserving this
             function's original metrics-only behavior).
+        encoder_adjacency: If given, a sparse adjacency matrix -- same convention as
+            ``split.train_adjacency`` (symmetric, binary, no self-loops) --
+            normalized the same way (:func:`~tnbbeta_vae.data.planetoid.
+            normalized_adjacency`) and used INSTEAD of ``split.train_adjacency`` for
+            the GCN encoder's aggregation step (``GraphBatch.norm_adjacency``). The
+            loss is unaffected: it always trains against the real edges from
+            ``split.train_adjacency`` (positive pairs, and the train/val/test
+            split), exactly as without this parameter -- only what the encoder
+            aggregates over changes. For example, a sparse identity matrix here
+            makes the encoder see each node's own transformed features with no
+            neighbor mixing at all, while the loss still trains against the real
+            graph's edges. ``None`` (the default) preserves this function's
+            original behavior exactly: the encoder also aggregates over
+            ``normalized_adjacency(split.train_adjacency)``.
 
     Returns:
         ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``, plus
@@ -194,7 +226,9 @@ def run_once(
         raise TypeError(f"Unsupported features type: {type(graph.features)}")
     batch = GraphBatch(
         features=features_tensor,
-        norm_adjacency=normalized_adjacency(split.train_adjacency),
+        norm_adjacency=normalized_adjacency(
+            split.train_adjacency if encoder_adjacency is None else encoder_adjacency
+        ),
         positive_edges=torch.as_tensor(upper, dtype=torch.long),
     ).to(device)
     model = GraphVAE(config).to(device)

@@ -13,6 +13,7 @@ import torch
 from torch import Tensor, nn
 from torch.distributions import Distribution
 
+from tnbbeta_vae.models.architectures.mlp import mlp_stack
 from tnbbeta_vae.models.heads import (
     LatentFamily,
     head_size,
@@ -68,13 +69,13 @@ class MlpVAE(nn.Module):
         """
         super().__init__()
         self.config = config
-        self.encoder = _mlp([config.input_dim, *config.hidden_dims])
+        self.encoder = mlp_stack([config.input_dim, *config.hidden_dims])
         posterior_head_size = head_size(config.family, config.latent_dim)
         if config.family == "tnbbeta" and config.fixed_epsilon is not None:
             posterior_head_size -= 1
         self.posterior_head = nn.Linear(config.hidden_dims[-1], posterior_head_size)
         self.decoder = nn.Sequential(
-            _mlp([config.latent_dim, *reversed(config.hidden_dims)]),
+            mlp_stack([config.latent_dim, *reversed(config.hidden_dims)]),
             nn.Linear(config.hidden_dims[0], config.input_dim),
         )
         self.learned_scale = LearnedLikelihoodScale(config.likelihood_scale)
@@ -162,11 +163,3 @@ class MlpVAE(nn.Module):
     def _prior(self) -> Distribution:
         device = self.posterior_head.weight.device
         return standard_prior(self.config.family, self.config.latent_dim, device)
-
-
-def _mlp(sizes: list[int]) -> nn.Sequential:
-    """ReLU MLP whose layers follow ``sizes`` (activation after every layer)."""
-    layers: list[nn.Module] = []
-    for width_in, width_out in zip(sizes[:-1], sizes[1:], strict=True):
-        layers += [nn.Linear(width_in, width_out), nn.ReLU()]
-    return nn.Sequential(*layers)

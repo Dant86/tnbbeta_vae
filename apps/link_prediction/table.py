@@ -16,7 +16,12 @@ import sys
 
 from tnbbeta_vae.paths import checkpoint_dir
 
-_FAMILIES = {"gaussian": "N-VGAE", "vmf": "S-VGAE (vMF)", "tnbbeta": "TNBBeta-VGAE"}
+_FAMILIES = {
+    "gaussian": "N-VGAE",
+    "vmf": "S-VGAE (vMF)",
+    "tnbbeta": "TNBBeta-VGAE",
+    "power_spherical": "Power Spherical-VGAE",
+}
 
 
 def main(argv: list[str] | None = None) -> None:
