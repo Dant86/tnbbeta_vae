@@ -1,7 +1,10 @@
 """Link prediction on citation and co-authorship graphs.
 
-Supports Planetoid citation graphs (S-VAE paper, Table 4) and SNAP community graphs
-(co-authorship networks like com-DBLP with documented overlapping communities).
+Supports Planetoid citation graphs (S-VAE paper, Table 4), SNAP community graphs
+(co-authorship networks like com-DBLP with documented overlapping communities but no
+real features) and the NOCD paper's MAG co-authorship networks (``mag_cs``,
+``mag_eng``, ``mag_chem``, ``mag_med`` -- real bag-of-keyword features AND genuine
+overlapping ground-truth communities at once).
 
 Usage:
     uv run python -m apps.link_prediction.main --dataset cora --family tnbbeta \
@@ -29,6 +32,7 @@ import numpy as np
 import scipy.sparse as sp
 import torch
 
+from tnbbeta_vae.data.mag_coauthor import MAG_COAUTHOR_DATASETS, load_mag_coauthor
 from tnbbeta_vae.data.planetoid import Graph as PlanetoidGraph
 from tnbbeta_vae.data.planetoid import (
     LinkSplit,
@@ -44,7 +48,13 @@ from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import select_device
 
-_DEFAULT_EPOCHS = {"cora": 200, "citeseer": 200, "pubmed": 400, "dblp": 50}
+_DEFAULT_EPOCHS = {
+    "cora": 200,
+    "citeseer": 200,
+    "pubmed": 400,
+    "dblp": 50,
+    **{f"mag_{name}": 200 for name in MAG_COAUTHOR_DATASETS},
+}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -92,8 +102,12 @@ def main(argv: list[str] | None = None) -> None:
             "need every configuration's checkpoint.",
             file=sys.stderr,
         )
-    # Load from Planetoid or SNAP community dataset.
-    if args.dataset == "dblp":
+    # Load from Planetoid, SNAP community or MAG co-authorship dataset.
+    if args.dataset.startswith("mag_"):
+        graph = load_mag_coauthor(
+            data_dir() / "mag_coauthor", args.dataset.removeprefix("mag_")
+        )
+    elif args.dataset == "dblp":
         graph = load_snap_community(data_dir() / "snap_community", "dblp")
     else:
         graph = load_planetoid(data_dir() / "planetoid", args.dataset)

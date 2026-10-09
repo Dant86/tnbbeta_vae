@@ -2,7 +2,8 @@
 
 Usage:
     uv run python -m apps.eval.graph_posterior_shape --run-name NAME \
-        --dataset cora|citeseer|pubmed|dblp|amazon [--checkpoint final] [--device cpu]
+        --dataset cora|citeseer|pubmed|dblp|amazon|mag_cs|mag_eng|mag_chem|mag_med \
+        [--checkpoint final] [--device cpu]
 
 ``apps.eval.dblp_bridge_diagnostic``'s corrected shape diagnostic found that *every*
 com-DBLP node, bridge or not, sits in TNBBeta's proven bimodal regime (``m =
@@ -37,6 +38,7 @@ from typing import Any, cast
 
 import torch
 
+from tnbbeta_vae.data.mag_coauthor import MAG_COAUTHOR_DATASETS, load_mag_coauthor
 from tnbbeta_vae.data.planetoid import (
     PLANETOID_DATASETS,
     load_planetoid,
@@ -52,7 +54,11 @@ from tnbbeta_vae.training import load_model_checkpoint
 
 __all__ = ["graph_to_batch", "main"]
 
-_DATASETS = (*PLANETOID_DATASETS, *SNAP_COMMUNITY_DATASETS)
+_DATASETS = (
+    *PLANETOID_DATASETS,
+    *SNAP_COMMUNITY_DATASETS,
+    *(f"mag_{name}" for name in MAG_COAUTHOR_DATASETS),
+)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -143,10 +149,15 @@ def graph_to_batch(
 
 
 def _load_batch(dataset: str, device: torch.device) -> GraphBatch:
-    """Loads a named dataset (Planetoid or SNAP community) as a :class:`GraphBatch`."""
+    """Loads a named dataset (Planetoid, SNAP community or MAG co-authorship) as a
+    :class:`GraphBatch`."""
     if dataset in PLANETOID_DATASETS:
         graph: PlanetoidGraph | SnapGraph = load_planetoid(
             data_dir() / "planetoid", dataset
+        )
+    elif dataset.startswith("mag_"):
+        graph = load_mag_coauthor(
+            data_dir() / "mag_coauthor", dataset.removeprefix("mag_")
         )
     else:
         graph = load_snap_community(data_dir() / "snap_community", dataset)
