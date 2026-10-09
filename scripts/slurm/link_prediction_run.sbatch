@@ -6,7 +6,14 @@
 # mnist_sweep.sbatch.
 # The dataset must already be downloaded (apps.data.download_planetoid or
 # apps.data.download_snap_community). A task that lands on a node with no usable GPU
-# resubmits itself excluding that node (scripts/slurm/no_gpu_retry.sh, up to 5 attempts).
+# resubmits itself excluding that node (scripts/slurm/no_gpu_retry.sh, up to 5 attempts)
+# -- but only because --device is left unset below, letting apps.link_prediction.main's
+# own select_device(None) detect the broken-node case and exit 75 on purpose. A previous
+# version of this script hardcoded --device cuda, which select_device always honors
+# verbatim with no availability check at all; on a broken node that skipped the clean
+# exit(75) entirely and crashed later, uncaught, inside GraphBatch.to(device) with exit
+# code 1 instead -- a code resubmit_if_no_gpu doesn't recognize, so it never resubmitted
+# (job 2120361, 2026-10-09). Do not add --device back here.
 # Submit from the repo root:
 #   sbatch scripts/slurm/link_prediction_run.sbatch <dataset> <family> [extra args...]
 # e.g. the com-DBLP timing smoke test (run this one FIRST -- cheap, fast signal before
@@ -43,7 +50,7 @@ shift 2
 
 set +e
 uv run --no-sync python -m apps.link_prediction.main \
-    --dataset "${DATASET}" --family "${FAMILY}" --device cuda "$@"
+    --dataset "${DATASET}" --family "${FAMILY}" "$@"
 STATUS=$?
 set -e
 

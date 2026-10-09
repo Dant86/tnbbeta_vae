@@ -68,11 +68,23 @@ def test_runs_link_prediction_with_the_given_dataset_and_family(tmp_path: Path) 
     assert result.returncode == 0, result.stderr
     assert sbatch_calls == []
     (call,) = uv_calls
-    assert (
-        "apps.link_prediction.main --dataset dblp --family tnbbeta --device cuda"
-        in call
-    )
+    assert "apps.link_prediction.main --dataset dblp --family tnbbeta" in call
     assert "--lrs 0.01 --dropouts 0 --latent-dims 16 --epochs 5 --seeds 0" in call
+
+
+def test_does_not_hardcode_device(tmp_path: Path) -> None:
+    """Regression test for job 2120361 (2026-10-09): a previous version passed
+    --device cuda unconditionally, which select_device always honors verbatim with
+    no availability check -- on a broken GPU node that skipped select_device's own
+    clean exit(75) entirely, crashing later with an uncaught RuntimeError (exit code
+    1) that resubmit_if_no_gpu doesn't recognize, so it never resubmitted. --device
+    must stay unset here so apps.link_prediction.main's own select_device(None) can
+    detect that case and exit 75 on purpose.
+    """
+    _, uv_calls, _ = _run(tmp_path)
+
+    (call,) = uv_calls
+    assert "--device" not in call
 
 
 def test_no_gpu_resubmits_the_whole_job_with_its_arguments(tmp_path: Path) -> None:
