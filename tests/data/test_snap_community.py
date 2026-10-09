@@ -10,6 +10,7 @@ import scipy.sparse as sp
 
 from tnbbeta_vae.data.snap_community import (
     bridge_nodes,
+    identity_features,
     load_snap_communities,
     load_snap_community,
     primary_secondary_communities,
@@ -287,3 +288,26 @@ def test_primary_secondary_communities_skips_bridges_absent_from_memberships() -
     result = primary_secondary_communities(adjacency, {}, {0, 1})
 
     assert result == {}
+
+
+def test_identity_features_returns_a_sparse_identity_matrix() -> None:
+    features = identity_features(4)
+
+    assert features.shape == (4, 4)
+    assert features.is_sparse
+    assert np.allclose(features.to_dense().numpy(), np.eye(4))
+
+
+def test_identity_features_matches_load_snap_communitys_own_features(
+    tmp_path: Path,
+) -> None:
+    """load_snap_community's features are exactly identity_features' output, not a
+    separately-constructed copy that merely looks the same."""
+    _write_edge_list(tmp_path / "com-test.ungraph.txt.gz", [(0, 1), (1, 2)])
+    _write_community_file(tmp_path / "com-test.all.cmty.txt.gz", [[0, 1, 2]])
+
+    graph = load_snap_community(tmp_path, "test")
+
+    assert np.allclose(
+        graph.features.to_dense().numpy(), identity_features(3).to_dense().numpy()
+    )

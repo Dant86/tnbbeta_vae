@@ -135,6 +135,59 @@ def test_writes_posterior_shape_summary_for_a_mag_coauthor_dataset(
     assert results["dataset"] == "mag_cs"
 
 
+def test_ignore_features_builds_a_batch_with_identity_features(tmp_path: Path) -> None:
+    """``--ignore-features`` overrides the real (non-identity) Planetoid features with
+    an identity matrix of the right shape before building the batch -- asserted on
+    directly, not just trusted plumbing."""
+    config = GraphVAEConfig(
+        family=cast("Any", "tnbbeta"), in_features=6, hidden_dim=8, latent_dim=3
+    )
+    _write_checkpoint(tmp_path, "cora_nofeat_tnb_smoke", config)
+
+    batch = graph_posterior_shape._load_batch(
+        "cora", torch.device("cpu"), ignore_features=True
+    )
+
+    assert batch.features.shape == (6, 6)
+    dense = batch.features.to_dense() if batch.features.is_sparse else batch.features
+    assert torch.allclose(dense, torch.eye(6))
+
+
+def test_ignore_features_false_keeps_the_real_features(tmp_path: Path) -> None:
+    """Default behavior (the flag omitted/false) is unchanged: real, non-identity
+    features are used."""
+    batch = graph_posterior_shape._load_batch("cora", torch.device("cpu"))
+
+    assert batch.features.shape == (6, 4)
+    dense = batch.features.to_dense() if batch.features.is_sparse else batch.features
+    assert not torch.allclose(dense, torch.eye(6, 4))
+
+
+def test_main_with_ignore_features_writes_a_summary_built_from_identity_features(
+    tmp_path: Path,
+) -> None:
+    config = GraphVAEConfig(
+        family=cast("Any", "tnbbeta"), in_features=6, hidden_dim=8, latent_dim=3
+    )
+    _write_checkpoint(tmp_path, "cora_nofeat_tnb_smoke", config)
+
+    graph_posterior_shape.main(
+        [
+            "--run-name",
+            "cora_nofeat_tnb_smoke",
+            "--dataset",
+            "cora",
+            "--device",
+            "cpu",
+            "--ignore-features",
+        ]  # fmt: skip
+    )
+
+    output = tmp_path / "ckpt" / "cora_nofeat_tnb_smoke" / "posterior_shape_final.json"
+    results = json.loads(output.read_text())
+    assert results["num_nodes"] == 6
+
+
 def test_graph_to_batch_handles_a_synthetic_graph_with_sparse_identity_features() -> (
     None
 ):

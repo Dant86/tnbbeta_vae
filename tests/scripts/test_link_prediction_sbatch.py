@@ -3,7 +3,9 @@
 Covers the dimension-sweep convention (CLAUDE.md's "Sphere models' latent_dim is the
 AMBIENT dimension" note, mirrored from scripts/slurm/mnist_sweep.sbatch): the Gaussian
 family's --latent-dims are the manifold dims directly, and every sphere family
-(vmf, tnbbeta, power_spherical) gets each dim + 1.
+(vmf, tnbbeta, power_spherical) gets each dim + 1. MANIFOLD_DIMS is (8 16 32 64), the
+S-VAE paper's own dz sweep (Davidson et al. 2018, Section F.3), applied uniformly to
+every family including mag_cs, the fourth dataset in the array.
 """
 
 from __future__ import annotations
@@ -20,13 +22,17 @@ _REPO = Path(__file__).resolve().parents[2]
 @pytest.mark.parametrize(
     ("task", "dataset", "family", "latent_dims"),
     [
-        (0, "cora", "gaussian", "16 32 64"),
-        (1, "cora", "vmf", "17 33 65"),
-        (2, "cora", "tnbbeta", "17 33 65"),
-        (3, "cora", "power_spherical", "17 33 65"),
-        (4, "citeseer", "gaussian", "16 32 64"),
-        (9, "pubmed", "vmf", "17 33 65"),
-        (11, "pubmed", "power_spherical", "17 33 65"),
+        (0, "cora", "gaussian", "8 16 32 64"),
+        (1, "cora", "vmf", "9 17 33 65"),
+        (2, "cora", "tnbbeta", "9 17 33 65"),
+        (3, "cora", "power_spherical", "9 17 33 65"),
+        (4, "citeseer", "gaussian", "8 16 32 64"),
+        (9, "pubmed", "vmf", "9 17 33 65"),
+        (11, "pubmed", "power_spherical", "9 17 33 65"),
+        (12, "mag_cs", "gaussian", "8 16 32 64"),
+        (13, "mag_cs", "vmf", "9 17 33 65"),
+        (14, "mag_cs", "tnbbeta", "9 17 33 65"),
+        (15, "mag_cs", "power_spherical", "9 17 33 65"),
     ],
 )
 def test_sweep_script_maps_array_index_to_dataset_family_and_dimension_convention(

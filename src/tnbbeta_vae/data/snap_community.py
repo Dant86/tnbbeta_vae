@@ -27,6 +27,7 @@ __all__ = [
     "SNAP_COMMUNITY_DATASETS",
     "Graph",
     "bridge_nodes",
+    "identity_features",
     "load_snap_community",
     "load_snap_communities",
     "primary_secondary_communities",
@@ -116,20 +117,33 @@ def load_snap_community(root: Path, name: str) -> Graph:
     adjacency: Any = sp.csr_matrix((data, (rows, cols)), shape=(num_nodes, num_nodes))
     adjacency.eliminate_zeros()
 
-    # Create sparse identity features as torch.sparse_coo_tensor.
-    # This avoids materializing a dense num_nodes x num_nodes matrix, which would
-    # OOM for large graphs like com-DBLP (317K nodes -> 402GB dense).
+    return Graph(adjacency, identity_features(num_nodes), node_id_map)
+
+
+def identity_features(num_nodes: int) -> torch.Tensor:
+    """Builds a sparse ``num_nodes x num_nodes`` identity feature matrix.
+
+    A featureless-graph stand-in (SNAP's own convention for com-DBLP/com-amazon):
+    each node's "feature" is a one-hot indicator of its own identity, carrying no real
+    content. Stored as a ``torch.sparse_coo_tensor`` rather than a dense matrix, which
+    would OOM for large graphs (com-DBLP's 317K nodes -> 402GB dense).
+
+    Args:
+        num_nodes: Number of nodes (and the resulting square matrix's side length).
+
+    Returns:
+        A coalesced sparse identity matrix, shape ``(num_nodes, num_nodes)``, dtype
+        ``float32``.
+    """
     indices = torch.arange(num_nodes, dtype=torch.long).unsqueeze(0).repeat(2, 1)
     values = torch.ones(num_nodes, dtype=torch.float32)
-    features = torch.sparse_coo_tensor(
+    return torch.sparse_coo_tensor(
         indices,
         values,
         (num_nodes, num_nodes),
         dtype=torch.float32,
         check_invariants=False,
     ).coalesce()
-
-    return Graph(adjacency, features, node_id_map)
 
 
 def load_snap_communities(root: Path, name: str) -> dict[int, set[int]]:
