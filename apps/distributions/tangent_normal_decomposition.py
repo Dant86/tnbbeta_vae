@@ -42,7 +42,7 @@ _X_COLOR = "#d62728"
 _XI_COLOR = "#2ca02c"
 _T_COLOR = "#ff7f0e"
 _HELPER_COLOR = "#7f7f7f"
-_DISK_COLOR = "#1f77b4"
+_DISK_COLOR = _XI_COLOR
 
 __all__ = ["build_figure", "main"]
 
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     figure = build_figure(args.t, args.phi)
-    figure.write_image(args.output, width=750, height=750, scale=2)
+    figure.write_image(args.output, width=750, height=620, scale=2)
     print(f"Wrote {args.output}")
 
 
@@ -111,17 +111,21 @@ def build_figure(t: float, phi: float) -> go.Figure:
 
     figure.update_layout(
         template=TEMPLATE_NAME,
-        title="Tangent-normal decomposition on S²:  x = t·μ + √(1−t²)·ξ",
+        title={
+            "text": "Tangent-normal Decomposition Illustration",
+            "y": 0.98,
+            "yanchor": "top",
+        },
         showlegend=False,
         scene={
             "aspectmode": "cube",
             "xaxis": {"visible": False},
             "yaxis": {"visible": False},
             "zaxis": {"visible": False},
-            "camera": {"eye": {"x": 1.1, "y": -1.2, "z": 0.65}},
+            "camera": {"eye": {"x": 0.95, "y": -1.05, "z": 0.55}},
             "domain": {"x": [0.0, 1.0], "y": [0.0, 1.0]},
         },
-        margin={"l": 0, "r": 0, "t": 60, "b": 0},
+        margin={"l": 0, "r": 0, "t": 36, "b": 0},
     )
     return figure
 
