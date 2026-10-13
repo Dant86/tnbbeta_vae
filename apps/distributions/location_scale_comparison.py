@@ -4,7 +4,7 @@ styling as the TNBBeta p x q ablation grid (``apps.distributions.pq_ablation``).
 
 Usage:
     uv run python -m apps.distributions.location_scale_comparison \\
-        [--output PATH] [--kappa 8.0] [--resolution 60] [--curve-points 400]
+        [--output PATH] [--kappa 50.0] [--resolution 60] [--curve-points 400]
 
 Illustrates the paper's closing remark in section 2
 (``sections/2_unit_interval_to_hypersphere.tex``) that von Mises-Fisher and Power
@@ -34,15 +34,18 @@ from plotly.subplots import make_subplots
 import torch
 from torch import Tensor
 
-from apps.distributions.ablation_grid import color_range, sphere_mesh
+from apps.distributions.ablation_grid import sphere_mesh
 from tnbbeta_vae.distributions import PowerSpherical, VonMisesFisher
 from tnbbeta_vae.plotting import TEMPLATE_NAME
 
-# Deliberately not a coordinate axis -- see the module docstring.
-_MEAN_DIRECTION = torch.tensor([1.0, 1.0, 1.0])
+# Deliberately not e_1, and offset ~72 degrees from the camera's own viewing
+# direction (eye=(1.4, 1.4, 1.0) below), so a concentrated cap is actually
+# visible against a clearly colder background instead of the camera staring
+# straight down the mean direction and seeing only a smooth gradient.
+_MEAN_DIRECTION = torch.tensor([0.1, -0.3, 0.95])
 _MEAN_DIRECTION = _MEAN_DIRECTION / _MEAN_DIRECTION.norm()
 _CURVE_COLOR = "#e7298a"
-_PANELS = ("von Mises-Fisher", "Power Spherical")
+_PANELS = ("vMF", "Power-Spherical")
 
 __all__ = ["build_figure", "main"]
 
@@ -55,7 +58,7 @@ def main(argv: list[str] | None = None) -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=str, default="location_scale_comparison.png")
-    parser.add_argument("--kappa", type=float, default=8.0)
+    parser.add_argument("--kappa", type=float, default=50.0)
     parser.add_argument("--resolution", type=int, default=60)
     parser.add_argument("--curve-points", type=int, default=400)
     args = parser.parse_args(argv)
@@ -106,7 +109,7 @@ def build_figure(kappa: float, resolution: int, curve_points: int) -> go.Figure:
     for col, dist in enumerate(distributions, start=1):
         with torch.no_grad():
             mesh_log_density = dist.log_prob(mesh_points).reshape(mesh_x.shape)
-        cmin, cmax = color_range(mesh_log_density)
+        cmin, cmax = _color_range(mesh_log_density)
         figure.add_trace(
             go.Surface(
                 x=mesh_x,
@@ -153,11 +156,41 @@ def build_figure(kappa: float, resolution: int, curve_points: int) -> go.Figure:
     mu = ", ".join(f"{v:.2f}" for v in _MEAN_DIRECTION.tolist())
     figure.update_layout(
         template=TEMPLATE_NAME,
-        title_text=f"vMF vs. Power Spherical (kappa={kappa:g}, mu=[{mu}])",
+        title_text=f"vMF vs. Power-Spherical (kappa={kappa:g}, mu=[{mu}])",
         showlegend=False,
         margin={"l": 20, "r": 10, "t": 70, "b": 30},
     )
     return figure
+
+
+def _color_range(log_density: Tensor) -> tuple[float, float]:
+    """Returns a (cmin, cmax) color range clipped to the 1st-99th percentile.
+
+    Both families' log-density over the *whole* sphere mesh is heavily
+    left-skewed: it is relatively flat across most of the mu-facing
+    hemisphere and only plunges steeply in a thin sliver right at the
+    antipode (most pronounced for Power Spherical's ``(1 + t)^kappa``
+    kernel, whose log is nearly linear near ``t=1`` but diverges as
+    ``t -> -1``). Unlike :func:`apps.distributions.ablation_grid.color_range`
+    (which pads a near-constant range), scaling the color axis to the raw
+    min/max here buries nearly all of the *visible*, camera-facing
+    hemisphere's real variation under that one occluded tail, washing the
+    cap out to a single flat color. Clipping to the 1st/99th percentile
+    keeps that extreme tail from dominating the scale.
+
+    Args:
+        log_density: Log-density values over the full sphere mesh.
+
+    Returns:
+        ``(cmin, cmax)`` for the colorscale.
+    """
+    values = log_density.flatten().numpy()
+    lo, hi = float(np.percentile(values, 1)), float(np.percentile(values, 99))
+    min_span = 0.5
+    if hi - lo < min_span:
+        centre = (lo + hi) / 2
+        return centre - min_span / 2, centre + min_span / 2
+    return lo, hi
 
 
 def _points_at(t: Tensor, mean_direction: Tensor) -> Tensor:
