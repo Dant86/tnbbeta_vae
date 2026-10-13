@@ -16,3 +16,26 @@ def test_writes_a_png(tmp_path: Path) -> None:
     )
 
     assert output.exists() and output.stat().st_size > 0
+
+
+def test_p_values_and_q_values_override_the_default_grid(tmp_path: Path) -> None:
+    output = tmp_path / "pq_ablation_2x2.png"
+
+    pq_ablation.main(
+        [
+            "--output",
+            str(output),
+            "--resolution",
+            "6",
+            "--curve-points",
+            "20",
+            "--p-values",
+            "0.5",
+            "0.95",
+            "--q-values",
+            "0.0",
+            "0.9",
+        ]
+    )
+
+    assert output.exists() and output.stat().st_size > 0
