@@ -3,7 +3,8 @@
 Usage:
     uv run python -m apps.synthetic.sbm_recovery [--out-dir DIR] \
         [--num-communities 10] [--nodes-per-community 50] \
-        [--p-in 0.3] [--p-out 0.01] [--latent-dim 16] [--epochs 200] \
+        [--p-in 0.3] [--p-out 0.01] [--feature-noise-std NONE] \
+        [--latent-dim 16] [--epochs 200] \
         [--graph-seed 0] [--seed 0] [--run-name sbm_recovery] \
         [--families gaussian vmf power_spherical tnbbeta]
 
@@ -97,6 +98,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--p-in", type=float, default=0.3)
     parser.add_argument("--p-out", type=float, default=0.01)
     parser.add_argument(
+        "--feature-noise-std",
+        type=float,
+        default=None,
+        help=(
+            "If set, overrides the default identity features with a one-hot"
+            " community vector plus N(0, feature_noise_std**2) i.i.d. noise (see"
+            " tnbbeta_vae.data.stochastic_block_model.stochastic_block_model's"
+            " docstring) -- a tunable interpolation from 'noise completely swamps"
+            " the signal' (large values) to 'exact community revealed' (near 0)."
+            " Omitting this flag (the default, None) preserves today's identity-"
+            " feature behavior exactly."
+        ),
+    )
+    parser.add_argument(
         "--latent-dim",
         type=int,
         default=16,
@@ -170,6 +185,7 @@ def main(argv: list[str] | None = None) -> None:
         p_in=args.p_in,
         p_out=args.p_out,
         seed=args.graph_seed,
+        feature_noise_std=args.feature_noise_std,
     )
     split = split_edges(
         graph.adjacency,
