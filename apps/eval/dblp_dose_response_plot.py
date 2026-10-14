@@ -32,7 +32,7 @@ from plotly.subplots import make_subplots
 
 from tnbbeta_vae.plotting import TEMPLATE_NAME
 
-__all__ = ["build_figure", "load_results"]
+__all__ = ["add_band_and_line", "build_figure", "load_results", "to_rgba"]
 
 _BUCKETS = ["0", "1", "2", "3", "4", "5+"]
 _METRICS = [("auc", "AUC"), ("ap", "AP")]
@@ -126,7 +126,7 @@ def build_figure(per_family: Results, counts: dict[str, int]) -> go.Figure:
             series = per_family[family][metric]
             means = np.array([np.mean(series[bucket]) for bucket in _BUCKETS])
             stds = np.array([np.std(series[bucket]) for bucket in _BUCKETS])
-            _add_band_and_line(
+            add_band_and_line(
                 figure,
                 row=1,
                 col=col_index,
@@ -165,7 +165,7 @@ def build_figure(per_family: Results, counts: dict[str, int]) -> go.Figure:
     return figure
 
 
-def _add_band_and_line(
+def add_band_and_line(
     figure: go.Figure,
     *,
     row: int,
@@ -176,9 +176,11 @@ def _add_band_and_line(
     color: str,
     name: str,
     show_legend: bool,
+    dash: bool = False,
+    marker_symbol: str = "circle",
 ) -> None:
     """Adds a shaded +/- 1 std band (two invisible boundary traces, one filled) and
-    the solid mean line on top of it, to one subplot.
+    the mean line on top of it, to one subplot.
 
     Args:
         figure: Figure to add the traces to.
@@ -191,6 +193,13 @@ def _add_band_and_line(
         name: Legend label.
         show_legend: Whether this family's entry should appear in the legend (only the
             first subplot needs to show it, since the legend is shared).
+        dash: Draws a dashed line instead of solid, for visually marking a baseline
+            as distinct from the models actually being compared (e.g.
+            ``apps.eval.mnist_table1_lines``'s Gaussian baseline).
+        marker_symbol: Plotly marker symbol, e.g. ``"circle"``/``"square"``/
+            ``"diamond"``/``"triangle-up"`` -- lets two near-identical lines (e.g.
+            ``apps.eval.mnist_table1_lines``'s vMF/TNBBeta, which nearly coincide at
+            low dimensions) stay distinguishable even where their lines overlap.
     """
     figure.add_trace(
         go.Scatter(
@@ -211,20 +220,23 @@ def _add_band_and_line(
             mode="lines",
             line={"width": 0},
             fill="tonexty",
-            fillcolor=_to_rgba(color, 0.18),
+            fillcolor=to_rgba(color, 0.18),
             showlegend=False,
             hoverinfo="skip",
         ),
         row=row,
         col=col,
     )
+    line: dict[str, object] = {"color": color, "width": 2.5}
+    if dash:
+        line["dash"] = "dash"
     figure.add_trace(
         go.Scatter(
             x=x,
             y=mean,
             mode="lines+markers",
-            line={"color": color, "width": 2.5},
-            marker={"size": 6},
+            line=line,
+            marker={"size": 6, "symbol": marker_symbol},
             name=name,
             legendgroup=name,
             showlegend=show_legend,
@@ -234,7 +246,7 @@ def _add_band_and_line(
     )
 
 
-def _to_rgba(hex_color: str, alpha: float) -> str:
+def to_rgba(hex_color: str, alpha: float) -> str:
     """Converts a ``#rrggbb`` hex color to an ``rgba(...)`` string at ``alpha``."""
     hex_color = hex_color.lstrip("#")
     red, green, blue = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
