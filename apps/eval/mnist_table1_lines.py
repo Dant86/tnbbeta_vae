@@ -42,7 +42,15 @@ from tnbbeta_vae.plotting import TEMPLATE_NAME
 __all__ = ["build_figure", "main"]
 
 _DIMS = [2, 5, 10, 20, 40]
-_METRICS = [("ll", "LL"), ("elbo", "L[q]"), ("re", "RE"), ("kl", "KL")]
+# Arrow direction: higher is better for LL/L[q]/RE; lower is better for KL, since
+# L[q] = RE - KL exactly (verifiable against the table), so a smaller KL directly
+# raises the ELBO for the same reconstruction term.
+_METRICS = [
+    ("ll", "LL (↑)"),
+    ("elbo", "L[q] (↑)"),
+    ("re", "RE (↑)"),
+    ("kl", "KL (↓)"),
+]
 
 # model -> dim -> metric -> (mean, std). vMF has no d=40 entry (see module docstring).
 _DATA: dict[str, dict[int, dict[str, tuple[float, float]]]] = {
