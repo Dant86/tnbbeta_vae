@@ -2,7 +2,12 @@
 
 Usage:
     uv run python -m apps.distributions.p_epsilon_ablation [--output PATH] \\
-        [--resolution 60] [--curve-points 400]
+        [--resolution 60] [--curve-points 400] \\
+        [--p-values P [P ...]] [--epsilon-values E [E ...]]
+
+``--p-values``/``--epsilon-values`` default to the full grid below; pass a
+smaller subset (e.g. two of each, for a 2x2 grid) for a cheaper, illustrative
+figure -- see ``apps.distributions.pq_ablation``'s same override.
 
 Sibling sweep to ``pq_ablation`` (p x q, epsilon fixed): here q is fixed at 0
 (the collapsed special case seen throughout this project's trained posteriors --
@@ -36,12 +41,16 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--output", type=str, default="p_epsilon_ablation.png")
     parser.add_argument("--resolution", type=int, default=60)
     parser.add_argument("--curve-points", type=int, default=400)
+    parser.add_argument("--p-values", type=float, nargs="+", default=_P_VALUES)
+    parser.add_argument(
+        "--epsilon-values", type=float, nargs="+", default=_EPSILON_VALUES
+    )
     args = parser.parse_args(argv)
 
     figure = build_grid_figure(
-        row_values=_P_VALUES,
+        row_values=args.p_values,
         row_label="p",
-        column_values=_EPSILON_VALUES,
+        column_values=args.epsilon_values,
         column_label="epsilon",
         params_for_cell=lambda p, epsilon: (p, _Q, epsilon),
         mean_direction=DEFAULT_MEAN_DIRECTION,
@@ -53,9 +62,12 @@ def main(argv: list[str] | None = None) -> None:
         curve_points=args.curve_points,
     )
     figure.write_image(
+        # A minimum canvas size, not just 210/230-per-cell, so a small grid
+        # (e.g. a 2x2 subset via --p-values/--epsilon-values) still has room
+        # for the full title instead of clipping it.
         args.output,
-        width=210 * len(_EPSILON_VALUES),
-        height=230 * len(_P_VALUES),
+        width=max(210 * len(args.epsilon_values), 900),
+        height=max(230 * len(args.p_values), 550),
         scale=2,
     )
     print(f"Wrote {args.output}")
