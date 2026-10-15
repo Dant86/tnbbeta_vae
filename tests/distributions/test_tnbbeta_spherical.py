@@ -8,7 +8,7 @@ import pytest
 import torch
 
 from tnbbeta_vae.distributions import TNBBetaSpherical
-from tnbbeta_vae.distributions.tnbbeta_spherical import _householder_reflect
+from tnbbeta_vae.distributions.tnbbeta_spherical import householder_reflect
 
 
 def test_rejects_dim_less_than_two() -> None:
@@ -110,14 +110,14 @@ def test_log_prob_matches_direct_circle_parameterization() -> None:
 
 
 def test_householder_reflect_maps_pole_to_mean_direction() -> None:
-    """Sanity-checks the private reflection helper directly."""
+    """Sanity-checks the reflection helper directly."""
     torch.manual_seed(3)
     mu = torch.randn(5)
     mu = mu / mu.norm()
     pole = torch.zeros(5)
     pole[0] = 1.0
 
-    reflected = _householder_reflect(pole, mu)
+    reflected = householder_reflect(pole, mu)
 
     assert torch.allclose(reflected, mu, atol=1e-6)
 
@@ -130,7 +130,7 @@ def test_householder_reflect_is_an_involution() -> None:
     z = torch.randn(5)
     z = z / z.norm()
 
-    twice_reflected = _householder_reflect(_householder_reflect(z, mu), mu)
+    twice_reflected = householder_reflect(householder_reflect(z, mu), mu)
 
     assert torch.allclose(twice_reflected, z, atol=1e-5)
 
@@ -142,7 +142,7 @@ def test_householder_reflect_degenerate_case_is_identity() -> None:
     z = torch.randn(4)
     z = z / z.norm()
 
-    assert torch.allclose(_householder_reflect(z, pole), z, atol=1e-6)
+    assert torch.allclose(householder_reflect(z, pole), z, atol=1e-6)
 
 
 def test_rsample_is_differentiable_wrt_all_parameters() -> None:

@@ -73,6 +73,22 @@ automatically on commit, excluding `notebooks/`.
   vMF always has), so `p` carries almost no class signal by construction; `epsilon` (the
   cap's thickness there) is the parameter actually analogous to vMF's kappa, and
   `confidence_probe.py --param epsilon` probes that instead.
+- `diffusion/`: closed-form forward-noising process for `TNBBetaSpherical`'s
+  latitude (epsilon merge/split, the Leisen et al. (2019, arXiv:1812.07271)
+  closed-form `q`-kernel, the exact `p`-logit-decoupling identity -- see
+  `docs/superpowers/specs/2026-10-05-sphere-diffusion-prior-design.md`).
+  `models/sphere_diffusion.py`'s `tnbbeta_spherical_diffusion_prior` wraps a
+  frozen, pretrained `conv_tnbbeta_spherical_vae` checkpoint with a small
+  `SphereDenoiserMLP` trained by direct `z_0`-regression (not literal
+  denoising score matching -- the forward process's closed-form density was
+  never derived, only its sampling correctness verified), to test whether a
+  learned prior produces sharper CIFAR-10 samples than the fixed
+  `Uniform(sphere)` baseline. Train it via the same
+  `apps/train/main.py --model tnbbeta_spherical_diffusion_prior --set
+  vae_run_name=<run>` CLI every other model uses; compare against the
+  baseline VAE's own samples via `apps/eval/fid.py` (unchanged, works on
+  either checkpoint) and `apps/eval/sample_grid.py` (new, qualitative
+  side-by-side).
 - Sphere models' `latent_dim` is the AMBIENT dimension (S^(latent_dim - 1) in R^latent_dim).
   The S-VAE paper's "d" is the manifold dimension: its d=2 S-VAE is S^2 in R^3 (Figure 2 shows
   a Hammer projection of S^2, and the reference code trains the vMF model with `z_dim + 1`).

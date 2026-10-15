@@ -28,6 +28,10 @@ from tnbbeta_vae.models.pairwise_mlp_vae import (
     PairwiseMlpVAEConfig,
 )
 from tnbbeta_vae.models.semi_supervised import M1M2VAE, M1M2Config, SemiBatch
+from tnbbeta_vae.models.sphere_diffusion import (
+    SphereDiffusionPrior,
+    SphereDiffusionPriorConfig,
+)
 
 __all__ = [
     "ConvGaussianVAE",
@@ -49,5 +53,7 @@ __all__ = [
     "PairwiseMlpVAE",
     "PairwiseMlpVAEConfig",
     "SemiBatch",
+    "SphereDiffusionPrior",
+    "SphereDiffusionPriorConfig",
     "tnbbeta_spherical_posterior_diagnostics",
 ]
