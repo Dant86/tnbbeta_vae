@@ -33,8 +33,13 @@ __all__ = ["build_figure", "load_raw", "main"]
 
 # Ordered low -> high p_out: a "heat" progression (cooler = cleaner communities,
 # hotter = more cross-community mixing), not an arbitrary categorical palette,
-# since p_out is itself an ordered quantity.
-_P_OUT_ORDER = ["0.005", "0.01", "0.02", "0.05", "0.1"]
+# since p_out is itself an ordered quantity. p_out=0.1 is deliberately excluded --
+# that checkpoint collapsed (near-random-init), so its m is a near-constant
+# ~-6.805 regardless of node, same confounded status noted everywhere else this
+# dose-response appears (e.g. it's excluded from the weight-transfer test's
+# "well-trained" anchors). Plotting it alongside the other four would read as "no
+# degree effect at high p_out" rather than "this checkpoint carries no signal."
+_P_OUT_ORDER = ["0.005", "0.01", "0.02", "0.05"]
 _P_OUT_COLORS = {
     "0.005": "#0d0887",
     "0.01": "#7e03a8",
