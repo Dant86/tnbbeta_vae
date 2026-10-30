@@ -1,7 +1,7 @@
 """Block-structured synthetic graphs with known edge probabilities.
 
 A generalization of :mod:`tnbbeta_vae.data.stochastic_block_model` whose block affinity
-matrix is arbitrary (assortative, bipartite / disassortative, hub-and-spoke, ...), with
+matrix is arbitrary (assortative, bipartite / disassortative, core-periphery, ...), with
 optional degree heterogeneity, and which returns the *true* probability of every node
 pair. Link-prediction metrics can then be compared against ground truth, not just
 against held-out edges.
@@ -25,7 +25,7 @@ __all__ = [
     "assortative_spec",
     "bipartite_spec",
     "block_graph",
-    "hub_spoke_spec",
+    "core_periphery_spec",
 ]
 
 
@@ -119,33 +119,43 @@ def bipartite_spec(
     return BlockSpec(affinity, [size, size], kinds)
 
 
-def hub_spoke_spec(
-    num_hubs: int = 10,
-    leaves_per_hub: int = 50,
-    p_hub_leaf: float = 0.6,
-    p_leaf_leaf: float = 0.01,
-    p_hub_hub: float = 0.5,
+def core_periphery_spec(
+    num_groups: int = 5,
+    core_size: int = 20,
+    periphery_size: int = 80,
+    p_core_core: float = 0.5,
+    p_core_periphery: float = 0.2,
+    p_other: float = 0.004,
 ) -> BlockSpec:
-    """Hubs, each linked to its own leaves, which barely link to each other.
+    """Groups, each a dense core with a sparse periphery that attaches to the core.
 
-    Blocks ``0..num_hubs-1`` are single hubs; blocks ``num_hubs..2*num_hubs-1`` are each
-    hub's leaves. A hub links to its own leaves with ``p_hub_leaf`` and to other hubs'
-    leaves never; leaves link to each other, within or across hubs, with
-    ``p_leaf_leaf``.
+    Blocks ``0..num_groups-1`` are the cores and ``num_groups..2*num_groups-1`` the
+    peripheries. Within a group, cores link densely (``p_core_core``) and to their own
+    periphery (``p_core_periphery``); every other pair, including periphery-periphery
+    even within a group, links with ``p_other``. So periphery nodes sit near their core
+    in a dot-product embedding yet should not link to each other: a disassortative
+    pattern a dot-product decoder cannot represent exactly. Each periphery node has
+    about ``core_size * p_core_periphery`` core neighbours, so its group is recoverable
+    from structure.
     """
-    k = 2 * num_hubs
-    affinity = np.full((k, k), p_leaf_leaf)
-    kinds = [["leaf-leaf-diff-hub"] * k for _ in range(k)]
+    k = 2 * num_groups
+    affinity = np.full((k, k), p_other)
+    kinds = [["periphery-periphery-diff"] * k for _ in range(k)]
     for a in range(k):
         for b in range(k):
-            hub_a, hub_b = a < num_hubs, b < num_hubs
-            if hub_a and hub_b:
-                affinity[a, b] = p_hub_hub if a != b else 0.0
-                kinds[a][b] = "hub-hub"
-            elif hub_a != hub_b:
-                hub, leaf = (a, b - num_hubs) if hub_a else (b, a - num_hubs)
-                affinity[a, b] = p_hub_leaf if hub == leaf else 0.0
-                kinds[a][b] = "hub-own-leaf" if hub == leaf else "hub-other-leaf"
-            elif a == b:
-                kinds[a][b] = "leaf-leaf-same-hub"
-    return BlockSpec(affinity, [1] * num_hubs + [leaves_per_hub] * num_hubs, kinds)
+            core_a, core_b = a < num_groups, b < num_groups
+            group_a, group_b = a % num_groups, b % num_groups
+            same = group_a == group_b
+            if core_a and core_b:
+                kinds[a][b] = "core-core-same" if same else "core-core-diff"
+                if same:
+                    affinity[a, b] = p_core_core
+            elif core_a != core_b:
+                kinds[a][b] = "core-own-periphery" if same else "core-other-periphery"
+                if same:
+                    affinity[a, b] = p_core_periphery
+            elif same:
+                kinds[a][b] = "periphery-periphery-same"
+    return BlockSpec(
+        affinity, [core_size] * num_groups + [periphery_size] * num_groups, kinds
+    )

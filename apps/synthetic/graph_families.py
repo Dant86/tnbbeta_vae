@@ -1,7 +1,7 @@
 """Link prediction on synthetic graph families with known edge probabilities.
 
 Usage:
-    uv run python -m apps.synthetic.graph_families --graph hub_spoke --family vmf \
+    uv run python -m apps.synthetic.graph_families --graph core_periphery --family vmf \
         [--fixed-kappa K | --fixed-m M] [--latent-dim 16] [--epochs 500] \
         [--seeds 0 1 2 3 4] --results-name NAME
 
@@ -14,7 +14,8 @@ a featureless ``GraphVAE`` and scores it three ways:
    (mean of ``sigmoid(logit)`` over posterior samples) versus the plug-in centre
    probability;
 3. divergence of the predicted pair probabilities from the *true* ones, over every pair
-   that is not a training edge, overall and per pair kind (e.g. ``leaf-leaf-same-hub``).
+   that is not a training edge, overall and per pair kind (e.g.
+   ``periphery-periphery-same``).
    The truth is mapped through ``balanced_truth``, since 1:1 negative sampling trains
    the model to output ``P / (P + rho)``, not ``P``.
 
@@ -38,7 +39,7 @@ from tnbbeta_vae.data.block_graph import (
     assortative_spec,
     bipartite_spec,
     block_graph,
-    hub_spoke_spec,
+    core_periphery_spec,
 )
 from tnbbeta_vae.data.planetoid import (
     Graph,
@@ -65,7 +66,7 @@ PRESETS: dict[str, Callable[[int], BlockGraph]] = {
         assortative_spec(p_in=0.1), seed=seed, degree_exponent=2.5
     ),
     "bipartite": lambda seed: block_graph(bipartite_spec(), seed=seed),
-    "hub_spoke": lambda seed: block_graph(hub_spoke_spec(), seed=seed),
+    "core_periphery": lambda seed: block_graph(core_periphery_spec(), seed=seed),
 }
 
 

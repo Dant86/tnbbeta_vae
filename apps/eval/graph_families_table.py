@@ -19,6 +19,15 @@ import numpy as np
 from apps.synthetic.graph_families import PRESETS
 from tnbbeta_vae.paths import checkpoint_dir
 
+CONDITIONS = [
+    "tnbbeta_free",
+    "tnbbeta_f0.5",
+    "vmf_free",
+    "vmf_k1",
+    "power_spherical_free",
+    "power_spherical_k1",
+    "gaussian",
+]
 _METRICS = [
     ("centre_test_auc", "centre AUC"),
     ("sampled_test_auc", "sampled AUC"),
@@ -53,11 +62,12 @@ def main(argv: list[str] | None = None) -> None:
 
 def collect(directory: Path, graph: str) -> dict[str, list[dict]]:
     """Returns each condition's per-seed result dicts for ``graph``."""
-    prefix = f"gf_{graph}_"
-    return {
-        path.stem.removeprefix(prefix): json.loads(path.read_text())["runs"]
-        for path in sorted(directory.glob(f"{prefix}*.json"))
-    }
+    found = {}
+    for condition in CONDITIONS:
+        path = directory / f"gf_{graph}_{condition}.json"
+        if path.exists():
+            found[condition] = json.loads(path.read_text())["runs"]
+    return found
 
 
 def summary_table(conditions: dict[str, list[dict]]) -> str:

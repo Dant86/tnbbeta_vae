@@ -23,14 +23,14 @@ def _run(auc: float, kl: float) -> dict:
 
 def test_tables_summarize_conditions_for_one_graph(tmp_path: Path) -> None:
     for condition, auc in (("vmf_free", 0.7), ("vmf_k1", 0.8)):
-        (tmp_path / f"gf_hub_spoke_{condition}.json").write_text(
+        (tmp_path / f"gf_core_periphery_{condition}.json").write_text(
             json.dumps({"runs": [_run(auc, 0.1), _run(auc + 0.02, 0.3)]})
         )
     (tmp_path / "gf_bipartite_vmf_free.json").write_text(
         json.dumps({"runs": [_run(0.5, 0.1)]})
     )
 
-    conditions = collect(tmp_path, "hub_spoke")
+    conditions = collect(tmp_path, "core_periphery")
 
     assert set(conditions) == {"vmf_free", "vmf_k1"}
     table = summary_table(conditions)

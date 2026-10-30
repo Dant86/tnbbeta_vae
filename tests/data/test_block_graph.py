@@ -8,7 +8,7 @@ from tnbbeta_vae.data.block_graph import (
     assortative_spec,
     bipartite_spec,
     block_graph,
-    hub_spoke_spec,
+    core_periphery_spec,
 )
 
 
@@ -34,19 +34,39 @@ def test_adjacency_is_symmetric_binary_and_has_the_right_density() -> None:
     assert abs(dense[:150, 150:].mean() - 0.3) < 0.03
 
 
-def test_hub_spoke_links_hubs_only_to_their_own_leaves() -> None:
-    spec = hub_spoke_spec(num_hubs=3, leaves_per_hub=4, p_hub_leaf=1.0)
+def test_core_periphery_links_cores_densely_and_peripheries_only_to_their_core() -> (
+    None
+):
+    spec = core_periphery_spec(
+        num_groups=2,
+        core_size=3,
+        periphery_size=4,
+        p_core_core=1.0,
+        p_core_periphery=1.0,
+        p_other=0.0,
+    )
     sample = block_graph(spec, seed=0)
-    hub_0, leaf_of_hub_0, leaf_of_hub_1 = 0, 3, 7
+    core_0, core_0_other, core_1, periphery_0, periphery_0_other, periphery_1 = (
+        0,
+        1,
+        3,
+        6,
+        7,
+        10,
+    )
 
-    assert sample.probability[hub_0, leaf_of_hub_0] == 1.0
-    assert sample.probability[hub_0, leaf_of_hub_1] == 0.0
-    assert sample.kind[hub_0, leaf_of_hub_0] == "hub-own-leaf"
-    assert sample.kind[hub_0, leaf_of_hub_1] == "hub-other-leaf"
-    assert sample.kind[leaf_of_hub_0, leaf_of_hub_0 + 1] == "leaf-leaf-same-hub"
-    assert sample.kind[leaf_of_hub_0, leaf_of_hub_1] == "leaf-leaf-diff-hub"
-    assert sample.kind[0, 1] == "hub-hub"
-    assert sample.adjacency[hub_0, leaf_of_hub_0] == 1.0
+    assert sample.probability[core_0, core_0_other] == 1.0
+    assert sample.probability[core_0, periphery_0] == 1.0
+    assert sample.probability[core_0, core_1] == 0.0
+    assert sample.probability[core_0, periphery_1] == 0.0
+    assert sample.probability[periphery_0, periphery_0_other] == 0.0
+    assert sample.kind[core_0, core_0_other] == "core-core-same"
+    assert sample.kind[core_0, core_1] == "core-core-diff"
+    assert sample.kind[core_0, periphery_0] == "core-own-periphery"
+    assert sample.kind[core_0, periphery_1] == "core-other-periphery"
+    assert sample.kind[periphery_0, periphery_0_other] == "periphery-periphery-same"
+    assert sample.kind[periphery_0, periphery_1] == "periphery-periphery-diff"
+    assert sample.adjacency[core_0, periphery_0] == 1.0
 
 
 def test_degree_exponent_skews_degrees_and_is_reproducible() -> None:

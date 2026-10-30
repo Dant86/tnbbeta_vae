@@ -4,7 +4,7 @@
 # expressivity matters and vMF / power-spherical / Gaussian fail?
 #
 # Graph presets (4): assortative, assortative_dc (degree-corrected), bipartite (extreme
-# disassortative), hub_spoke. Conditions (7), every one with matched ambient dimension 16
+# disassortative), core_periphery. Conditions (7), every one with matched ambient dimension 16
 # (Gaussian 15) and the SAME budget (500 epochs) -- the controls the fixed-kappa work showed
 # are required, since free kappa is slow to learn:
 #   tnbbeta_free, tnbbeta_f0.5 (epsilon fixed at m = 0.5 * (d-1)/2, unimodal),
@@ -29,7 +29,7 @@ source "${SLURM_SUBMIT_DIR}/scripts/slurm/no_gpu_retry.sh"
 
 CKPT_DIR="$(uv run --no-sync python -c 'from tnbbeta_vae.paths import checkpoint_dir; print(checkpoint_dir())')"
 
-PRESETS=(assortative assortative_dc bipartite hub_spoke)
+PRESETS=(assortative assortative_dc bipartite core_periphery)
 CONDITIONS=(tnbbeta_free tnbbeta_f0.5 vmf_free vmf_k1 power_spherical_free power_spherical_k1 gaussian)
 DIM=16
 CELLS_PER_TASK=4
