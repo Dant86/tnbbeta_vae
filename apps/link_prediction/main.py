@@ -248,6 +248,7 @@ def run_once(
     run_name: str | None = None,
     encoder_adjacency: SparseMatrix | None = None,
     trajectory: list[dict[str, float]] | None = None,
+    best_state: dict[str, torch.Tensor] | None = None,
 ) -> dict[str, float]:
     """Trains one model and returns the metrics at its best-validation epoch.
 
@@ -283,6 +284,9 @@ def run_once(
             statistics per logged epoch (see :func:`_snapshot`), with ``epoch = -1``
             for the untrained initialization. Sampling for the statistics runs under a
             forked RNG, so the returned metrics are identical with or without it.
+
+        best_state: If given, a dict that receives the best-validation-epoch model's
+            ``state_dict`` (cloned), without writing a checkpoint.
 
     Returns:
         ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``, plus
@@ -377,7 +381,7 @@ def run_once(
                 "test_ap": test_ap,
                 "best_epoch": float(epoch),
             }
-            if run_name is not None:
+            if run_name is not None or best_state is not None:
                 best_state_dict = {
                     key: value.detach().clone()
                     for key, value in model.state_dict().items()
@@ -385,6 +389,8 @@ def run_once(
 
     if run_name is not None and best_state_dict is not None:
         _save_checkpoint(run_name, seed, config, best_state_dict)
+    if best_state is not None and best_state_dict is not None:
+        best_state.update(best_state_dict)
 
     return {**best, "diverged": diverged}
 
