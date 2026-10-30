@@ -118,3 +118,5 @@ writeup/**/*.ind
 /data/
 /checkpoints/
 /slurm_logs/
+/cluster_runs/
+/dblp-results/**
