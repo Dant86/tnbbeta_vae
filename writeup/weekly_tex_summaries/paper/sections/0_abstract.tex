@@ -1,0 +1,12 @@
+Deep generative models typically employ an isotropic Gaussian prior due to its mathematical
+tractability, as well as it being the maximum entropy distribution on $\mathbb{R}^d$ up to mean
+and covariance constraints. In low dimensions, isotropic Gaussian samples concentrate about the origin
+while in high dimensions, they concentrate about a hyperspherical shell. Recent work has investigated
+hyperspherical embeddings using the uniform distribution as a prior. In the context of variational
+autoencoders (VAEs) \citep{kingma2022autoencodingvariationalbayes}, the von Mises-Fisher (vMF) and
+power-spherical distributions have been investigated as candidates for posterior approximation. This work
+provides an overview of existing hyperspherical posteriors and introduces the SphericalTNBBeta
+distribution which admits greater expressivity. We show that equipping a VAE with this posterior
+results in performance that at least matches the S-VAE \citep{davidson2022hypersphericalvariationalautoencoders}
+and the power-spherical VAE \citep{decao2020powersphericaldistribution}, and results in stronger representations
+of featureless graphs.

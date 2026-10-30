@@ -1,0 +1,40 @@
+Recent work in deep learning has demonstrated a strong interest in producing embeddings
+on the unit hypersphere as opposed to an unconstrained latent space. Downstream tasks
+such as retrieval, clustering, and k-NN classification rely on angular relationships
+between embeddings, and outside of uncertainty \citep{levi2025doubleellipsoidgeometryclip},
+the $\ell^2$ norm of an embedding tends to convey little information. Variational autoencoders (VAEs) serve as a natural testbed for investigating how hyperspherical
+embeddings differ from, or improve on, Euclidean embeddings in the context of deep generative models.
+
+The generative model for a VAE is defined as follows:
+\[
+    \begin{cases}
+        \mathbf{z} &\sim p(\mathbf{z}) \\
+        \mathbf{x} \mid \mathbf{z} &\sim p_{\boldsymbol{\theta}}(\mathbf{x} \mid \mathbf{z})
+    \end{cases}
+\]
+and the variational approximation to the posterior is
+\[
+    \mathbf{z} \mid \mathbf{x} \sim q_{\boldsymbol{\phi}}(\mathbf{z} \mid \mathbf{x})
+\]
+where $\mathbf{x}$ denotes the observed data and $\mathbf{z}$ denotes the latent variables. The subscripts
+$\boldsymbol{\theta}, \boldsymbol{\phi}$ denote parametrization by a deep neural network. In a Euclidean latent
+space, the usual choice for prior $p(\mathbf{z})$ is $\mathcal{N}(0, I)$. Ideally, one would want to choose a
+prior that is uniform over the support of $\mathbf{z}$, thus motivating the need for a compact latent space. On the
+hypersphere, $\text{Uniform}(\mathbb{S}^{d - 1})$ is then a natural choice of prior. As for extending the posterior
+to the hypersphere, the vMF distribution is a natural adaptation of the normal distribution. Parametrized by a mean
+direction $\boldsymbol{\mu}$ and concentration parameter $\kappa$, it can be considered a ``location-scale'' family
+in a similar sense to the normal distribution. \cite{davidson2022hypersphericalvariationalautoencoders} have shown that
+this hyperspherical generative model setup can match, or in some cases improve on, Gaussian performance on simple tasks
+in low dimensions.
+
+The vMF distribution does not come without its own problems, though. Its density involves the modified Bessel function
+which becomes unstable for large inputs, and it may only be sampled through rejection sampling which incurs a large
+speed hit for large values of $\kappa$. To mitigate these issues, \cite{decao2020powersphericaldistribution} introduced
+the power-spherical distribution, which is both numerically stable and can be sampled through a deterministic transformation
+of a beta-distributed sample. Even so, neither distribution can admit more than one mode on the unit hypersphere, which
+limits their expressivity. To that end, this paper introduces the SphericalTNBBeta distribution which exhibits the same
+benefits of the power-spherical distribution in the context of a VAE, but may also express two, or sometimes three modes.
+In evaluating hyperspherical VAEs on a series of downstream tasks, we find that the SphericalTNBBeta distribution is particularly
+well-positioned to represent featureless graphs, and performance improvement tends to correlate with the number of overlapping
+communities.
+

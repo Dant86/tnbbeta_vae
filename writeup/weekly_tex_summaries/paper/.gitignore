@@ -1,0 +1,47 @@
+# Build output directory
+build/
+
+# LaTeX auxiliary files
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+
+# Generated files
+*.pdf
+
+# Glossary/acronym files
+*.acn
+*.acr
+*.alg
+*.glg
+*.glo
+*.gls
+*.glsdefs
+
+# Index files
+*.idx
+*.ilg
+*.ind
+*.ist
+
+# Latexmk
+*.latexmain
+
+# Editor backup files
+*~
+*.bak
+*.swp
+.DS_Store
+
+# Local texmf
+texmf/
