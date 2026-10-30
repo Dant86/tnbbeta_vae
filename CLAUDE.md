@@ -163,6 +163,26 @@ automatically on commit, excluding `notebooks/`.
   per-family `d`/`d+1` dimension sweep are the next, broader empirical step, not yet
   run (`writeup/results/dimension_sweep_and_mag_coauthor_infra_2026-10-09.md` is
   infrastructure-only, no results yet).
+- `GraphVAEConfig.fixed_epsilon` (TNBBeta only; `heads.epsilon_from_m(m, latent_dim)` converts
+  a modality offset `m = epsilon - (latent_dim - 1) / 2`) pins every node's epsilon; default
+  `None` leaves the head shape and existing checkpoints unchanged. `apps.link_prediction.main`
+  and `apps.synthetic.sbm_recovery` expose it as `--fixed-m`. **Any single-seed or
+  single-configuration `apps.link_prediction.main` run must pass `--results-name`**: the default
+  summary path `link_prediction/<dataset>[_nofeat]_<family>.json` is the full grid search behind
+  the paper's Figure 5 and gets silently overwritten otherwise (this happened once; see
+  `writeup/results/fixed_m_sweeps_baselines_and_parameter_probes_2026-10-30.md`).
+- `apps/eval/bucketed_link_prediction.py` (per-bucket AUC by training degree / neighbor-community
+  count, pooled over both endpoints of held-out edges) and `apps/eval/param_probe.py` (what each
+  family's per-node posterior parameters encode, and AUC decoded from posterior samples vs.
+  centres) read checkpoints only and rebuild the edge split from the seed. Both run the encoder
+  over the *training* adjacency; `apps.eval.graph_posterior_shape.graph_to_batch` normalizes the
+  *full* graph, which the model never trained on -- do not use it for per-node statistics tied to
+  a trained checkpoint without swapping in `normalized_adjacency(split.train_adjacency)`.
+- The `general` SLURM QOS allows 24 running and 200 submitted jobs per user, so `fixed_m_*`
+  array scripts pack several cells per task (parallel processes sharing one GPU) instead of one
+  task per cell. Do not pass `--device cuda` explicitly in sbatch scripts: it bypasses
+  `select_device`'s exit-75 no-GPU handling, and a node with broken CUDA then fails every task in
+  seconds and drains the whole array.
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
   `training_step`, not in `Trainer`. It also writes/reads checkpoints
