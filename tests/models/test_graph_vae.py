@@ -481,3 +481,32 @@ def test_results_name_keeps_a_single_run_from_clobbering_the_grid_search_json(
 
     assert grid_search_json.read_text() == "original"
     assert (tmp_path / "link_prediction" / "one_cell.json").exists()
+
+
+@pytest.mark.parametrize("family", ["vmf", "power_spherical"])
+def test_fixed_kappa_shrinks_head_and_pins_kappa(family: str) -> None:
+    config = {"family": family, "in_features": 6, "latent_dim": 4}
+    free = GraphVAE(GraphVAEConfig(**config))  # type: ignore[arg-type]
+    fixed = GraphVAE(GraphVAEConfig(**config, fixed_kappa=9.0))  # type: ignore[arg-type]
+
+    assert fixed.second.out_features == free.second.out_features - 1
+    posterior = fixed._posterior(torch.randn(5, fixed.second.out_features))  # noqa: SLF001
+    kappa = posterior.scale if family == "vmf" else posterior.kappa  # type: ignore[attr-defined]
+    assert torch.allclose(kappa.reshape(-1), torch.full((5,), 9.0))
+    assert posterior.rsample().shape == (5, 4)
+
+
+@pytest.mark.parametrize("family", ["tnbbeta", "gaussian"])
+def test_fixed_kappa_rejects_families_without_a_kappa(family: str) -> None:
+    with pytest.raises(ValueError, match="fixed_kappa"):
+        GraphVAE(
+            GraphVAEConfig(family=family, in_features=6, latent_dim=4, fixed_kappa=3.0)  # type: ignore[arg-type]
+        )
+
+
+def test_fixed_kappa_out_of_range_is_rejected() -> None:
+    model = GraphVAE(
+        GraphVAEConfig(family="vmf", in_features=6, latent_dim=4, fixed_kappa=0.5)
+    )
+    with pytest.raises(ValueError, match="kappa"):
+        model._posterior(torch.randn(2, model.second.out_features))  # noqa: SLF001

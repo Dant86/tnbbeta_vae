@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = [
     "LatentFamily",
     "epsilon_from_m",
+    "fixed_kappa_posterior",
     "gaussian_posterior",
     "head_size",
     "posterior_centre",
@@ -129,6 +130,34 @@ def epsilon_from_m(m: float, latent_dim: int) -> float:
             f"m must exceed {-(latent_dim - 1) / 2}."
         )
     return epsilon
+
+
+def fixed_kappa_posterior(
+    family: LatentFamily, raw_mean: Tensor, kappa: float
+) -> Distribution:
+    """Builds a vMF or power-spherical posterior with one constant concentration.
+
+    Args:
+        family: ``"vmf"`` or ``"power_spherical"``.
+        raw_mean: Raw mean direction, shape ``(batch, latent_dim)``.
+        kappa: The concentration shared by every row, in ``(1, 1e6)`` for vMF (the
+            range :func:`vmf_kappa` reaches) and ``(0, 1e6)`` for power-spherical.
+
+    Returns:
+        The posterior, with the same distribution class and shapes
+        :func:`posterior_from_raw` gives that family.
+
+    Raises:
+        ValueError: If ``family`` has no concentration or ``kappa`` is out of range.
+    """
+    mean_direction = _unit_direction(raw_mean)
+    if family == "vmf":
+        vmf_kappa_inverse(kappa)  # Range check only.
+        return VonMisesFisher(mean_direction, torch.full_like(raw_mean[..., :1], kappa))
+    if family == "power_spherical":
+        power_spherical_kappa_inverse(kappa)  # Range check only.
+        return PowerSpherical(mean_direction, torch.full_like(raw_mean[..., 0], kappa))
+    raise ValueError(f"family {family!r} has no concentration to fix.")
 
 
 def vmf_posterior(raw_mean: Tensor, raw_kappa: Tensor) -> VonMisesFisher:
