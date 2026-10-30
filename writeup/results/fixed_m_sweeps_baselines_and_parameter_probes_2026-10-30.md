@@ -208,7 +208,14 @@ Supported by these data:
   (sampled AUC about equals centre AUC). vMF and power-spherical, at this dimension and
   budget, mostly do not.
 
-**Not established:** *why* vMF / power-spherical stay at the prior. One hypothesis I raised
+**Update (same day):** `vmf_ps_fixed_kappa_and_training_dynamics_2026-10-30.md` addresses
+this. Pinning kappa at `d` lets vMF / power-spherical match or beat TNBBeta, so the matched-
+dimension gap is a kappa-learning effect, not family quality; and part of the gap came from
+running vMF away from its selected dimension (ambient 9). Free kappa's initial value is also
+only *near* `softplus(0) + 1` (the head's raw output is random, not zero). The paragraph
+below is the pre-experiment state.
+
+**Not established (before that follow-up):** *why* vMF / power-spherical stay at the prior. One hypothesis I raised
 in discussion was that kappa is `softplus(raw)` (+1 for vMF), linear in `raw`, so reaching
 `kappa ~ d` takes a proportionally large `raw`, whereas `p = sigmoid(raw)` saturates at a
 logit of about 3. That is unverified, and the vMF dimension-aware-kappa note in `CLAUDE.md`

@@ -171,6 +171,7 @@ automatically on commit, excluding `notebooks/`.
   summary path `link_prediction/<dataset>[_nofeat]_<family>.json` is the full grid search behind
   the paper's Figure 5 and gets silently overwritten otherwise (this happened once; see
   `writeup/results/fixed_m_sweeps_baselines_and_parameter_probes_2026-10-30.md`).
+- `GraphVAEConfig.fixed_kappa` / `--fixed-kappa` (vMF and power-spherical only; head shrinks by one) pins every node's concentration, and `apps.link_prediction.main --log-trajectory` writes per-epoch kappa / `r_bar` / loss / head-gradient / validation-AUC statistics (forked RNG, so results are unchanged). Free-kappa vMF/PS barely learn kappa in 200 epochs on Cora/MAG-CS while pinned `kappa = d` matches TNBBeta, so a "TNBBeta beats vMF/PS" link-prediction comparison with learned kappa partly measures kappa optimization (`writeup/results/vmf_ps_fixed_kappa_and_training_dynamics_2026-10-30.md`).
 - `apps/eval/bucketed_link_prediction.py` (per-bucket AUC by training degree / neighbor-community
   count, pooled over both endpoints of held-out edges) and `apps/eval/param_probe.py` (what each
   family's per-node posterior parameters encode, and AUC decoded from posterior samples vs.

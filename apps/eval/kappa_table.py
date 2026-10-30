@@ -141,3 +141,7 @@ def _ratio(runs: list[dict], epoch: int) -> str:
         and row["grad_norm_direction_rows"] > 0
     ]
     return f"{np.mean(ratios):.3g}" if ratios else "-"
+
+
+if __name__ == "__main__":
+    main()
