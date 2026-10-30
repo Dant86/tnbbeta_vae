@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -81,6 +81,19 @@ def test_training_step_gradients_and_embeddings(family: Any) -> None:
     assert embeddings.shape == (120, 4)
     if family != "gaussian":
         assert torch.allclose(embeddings.norm(dim=-1), torch.ones(120), atol=1e-4)
+
+
+def test_log_temperature_stays_a_top_level_state_dict_key() -> None:
+    """Pins GraphVAE's state_dict shape so existing checkpoints keep loading.
+
+    ``log_temperature`` is a top-level ``nn.Parameter`` baked into every
+    real cluster checkpoint's ``state_dict`` (see CLAUDE.md). Extracting
+    ``link_logits``'s formula into ``pairwise_logits`` must not move or
+    rename it -- this guards against that regression specifically.
+    """
+    model = GraphVAE(GraphVAEConfig(family="vmf", in_features=6, latent_dim=4))
+
+    assert "log_temperature" in model.state_dict()
 
 
 def test_temperature_is_learned_by_default_and_fixed_when_given() -> None:
@@ -282,6 +295,125 @@ def _sparse_identity_batch(num_nodes: int, seed: int = 0) -> tuple[GraphBatch, A
         positive_edges=torch.as_tensor(upper, dtype=torch.long),
     )
     return batch, split
+
+
+def test_feature_reconstruction_weight_cli_flag_is_threaded_into_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TNBBETA_CHECKPOINT_DIR", str(tmp_path / "ckpt"))
+    monkeypatch.setenv("TNBBETA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(link_main, "load_planetoid", lambda *_: _community_graph())
+
+    link_main.main(
+        [
+            "--dataset",
+            "cora",
+            "--family",
+            "tnbbeta",
+            "--lrs",
+            "0.01",
+            "--dropouts",
+            "0",
+            "--latent-dims",
+            "4",
+            "--epochs",
+            "3",
+            "--seeds",
+            "0",
+            "--device",
+            "cpu",
+            "--feature-reconstruction-weight",
+            "0.5",
+            "--run-name",
+            "feature_recon_cli_test",
+        ]  # fmt: skip
+    )
+
+    checkpoint = torch.load(
+        tmp_path / "ckpt" / "feature_recon_cli_test_seed0" / "final.pt",
+        weights_only=False,
+    )
+    assert checkpoint["config"]["feature_reconstruction_weight"] == 0.5
+
+
+def test_default_config_state_dict_keys_are_unchanged() -> None:
+    """Pins GraphVAE's state_dict key set so real cluster checkpoints keep loading.
+
+    ``feature_reconstruction_weight`` defaults to ``0.0`` (no feature decoder), so a
+    default-config model's parameters must be byte-for-byte the pre-change set --
+    not just "no feature_decoder key", but nothing else either.
+    """
+    model = GraphVAE(GraphVAEConfig())
+
+    assert set(model.state_dict().keys()) == {
+        "first.weight",
+        "log_temperature",
+        "second.weight",
+    }
+
+
+def test_feature_reconstruction_weight_zero_never_builds_decoder() -> None:
+    model = GraphVAE(
+        GraphVAEConfig(
+            family="tnbbeta",
+            in_features=6,
+            latent_dim=4,
+            feature_reconstruction_weight=0.0,
+        )
+    )
+
+    assert model.feature_decoder is None
+
+
+def test_feature_reconstruction_weight_zero_training_step_keys_are_unchanged() -> None:
+    batch, _ = _batch(_community_graph())
+    model = GraphVAE(
+        GraphVAEConfig(
+            family="tnbbeta",
+            in_features=6,
+            latent_dim=4,
+            feature_reconstruction_weight=0.0,
+        )
+    )
+
+    out = model.training_step(batch)
+
+    assert set(out.keys()) == {"loss", "link_loss", "kl"}
+
+
+@pytest.mark.parametrize("family", _FAMILIES)
+def test_feature_reconstruction_weight_positive_builds_decoder_and_trains(
+    family: Any,
+) -> None:
+    torch.manual_seed(0)
+    batch, _ = _batch(_community_graph())
+    model = GraphVAE(
+        GraphVAEConfig(
+            family=family,
+            in_features=6,
+            latent_dim=4,
+            feature_reconstruction_weight=1.0,
+        )
+    )
+
+    assert isinstance(model.feature_decoder, torch.nn.Linear)
+
+    out = model.training_step(batch)
+    out["loss"].backward()
+
+    assert "feature_loss" in out
+    assert torch.isfinite(out["feature_loss"])
+    assert torch.isfinite(out["loss"])
+    # log_temperature is excluded: it never enters the Gaussian family's link logit
+    # (see pairwise_logits), so it has no gradient regardless of this change.
+    gradient_bearing = (
+        *model.first.parameters(),
+        *model.second.parameters(),
+        *cast("torch.nn.Linear", model.feature_decoder).parameters(),
+    )
+    assert all(
+        p.grad is not None and torch.isfinite(p.grad).all() for p in gradient_bearing
+    )
 
 
 @pytest.mark.parametrize("family", _FAMILIES)

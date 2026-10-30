@@ -1,9 +1,9 @@
-"""CLI entrypoint for training a registered model on CIFAR-10 or MNIST.
+"""CLI entrypoint for training a registered model on CIFAR-10, MNIST, or DTD.
 
 Usage:
     uv run python -m apps.train.main --list
     uv run python -m apps.train.main --model <name> [--set key=value ...] \
-        [--dataset cifar10|mnist] [--epochs N] [--batch-size N] [--lr X] \
+        [--dataset cifar10|mnist|dtd] [--epochs N] [--batch-size N] [--lr X] \
         [--seed N] [--patience N] [--kl-warmup-epochs N] \
         [--run-name NAME [--resume]]
 
@@ -13,6 +13,11 @@ validation epoch as ``final.pt``, and sets the model's ``image_channels=1``,
 ``image_size=28`` and ``likelihood=bernoulli`` unless ``--set`` overrides them.
 The S-VAE paper's protocol is ``--batch-size 64 --epochs 1000 --patience 50
 --kl-warmup-epochs 100``.
+
+``--dataset dtd`` trains on DTD's oriented-texture train split (see
+``tnbbeta_vae.data.dtd``), sets ``image_channels=3``, ``image_size=64`` and
+``likelihood=gaussian`` unless ``--set`` overrides them, and -- like
+``cifar10`` -- has no validation split, so ``--patience`` isn't available.
 
 Data, checkpoint and run-log locations come from ``.env`` (see
 ``.env.sample``). With ``--run-name``, checkpoints go to
@@ -26,13 +31,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.cifar10 import load_cifar10
+from tnbbeta_vae.data.dtd import load_dtd
 from tnbbeta_vae.data.mnist import DeviceBatches, load_mnist
 import tnbbeta_vae.models  # noqa: F401 -- import for its @register_model side effects
 from tnbbeta_vae.paths import checkpoint_dir, data_dir, runs_dir
@@ -52,6 +58,11 @@ _MNIST_MODEL_DEFAULTS = {
     "image_channels": "1",
     "image_size": "28",
     "likelihood": "bernoulli",
+}
+_DTD_MODEL_DEFAULTS = {
+    "image_channels": "3",
+    "image_size": "64",
+    "likelihood": "gaussian",
 }
 _VAL_BATCH_SIZE = 1000
 
@@ -74,7 +85,9 @@ def main(argv: list[str] | None = None) -> None:
         metavar="key=value",
         help="Model config override, may be repeated.",
     )
-    parser.add_argument("--dataset", choices=["cifar10", "mnist"], default="cifar10")
+    parser.add_argument(
+        "--dataset", choices=["cifar10", "mnist", "dtd"], default="cifar10"
+    )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=1e-3)
@@ -117,11 +130,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.resume and not args.run_name:
         parser.error("--resume requires --run-name.")
 
-    if args.dataset == "cifar10" and args.patience is not None:
+    if args.dataset in ("cifar10", "dtd") and args.patience is not None:
         parser.error("--patience needs a validation set; use --dataset mnist.")
     overrides = _parse_overrides(args.set)
     if args.dataset == "mnist":
         overrides = {**_MNIST_MODEL_DEFAULTS, **overrides}
+    elif args.dataset == "dtd":
+        overrides = {**_DTD_MODEL_DEFAULTS, **overrides}
 
     require_readable_storage(checkpoint_dir(), data_dir(), runs_dir())
     checkpoints = checkpoint_dir() / args.run_name if args.run_name else None
@@ -193,8 +208,13 @@ def _batches(
             shuffle=False,
         )
         return train, val
+    dataset: Any = (
+        load_dtd(data_dir(), split="train")
+        if args.dataset == "dtd"
+        else load_cifar10(data_dir(), train=True)
+    )
     loader = DataLoader(
-        load_cifar10(data_dir(), train=True),
+        dataset,
         batch_size=args.batch_size,
         shuffle=True,
         drop_last=True,

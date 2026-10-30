@@ -116,3 +116,33 @@ def test_samples_stay_on_the_circle_when_loc_is_near_the_pole() -> None:
     z = distribution.sample()
 
     assert torch.allclose(z.norm(dim=-1), torch.ones(500), atol=1e-5)
+
+
+def test_rsample_on_the_circle_is_finite_even_if_the_transverse_draw_is_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for a real training crash (axial_recovery, seed 0, epoch 75).
+
+    At ``dim == 2`` (``S^1``), the direction transverse to ``w`` is a single
+    scalar normalized by its own absolute value (``v / v.norm()``). A
+    standard-normal draw of exactly ``0.0`` -- rare but not impossible in
+    float32, and hit in practice over a few thousand training steps -- makes
+    that a ``0 / 0`` division, propagating ``NaN`` through the sample and
+    crashing training several steps later when the decoder's reconstruction
+    fails ``Normal``'s real-number validation. ``_householder_rotation``
+    already guards the analogous near-zero-norm case with ``clamp_min``;
+    this is the same guard applied to the transverse normalization.
+    """
+
+    def zero_sample(
+        self: torch.distributions.Normal, sample_shape: torch.Size | None = None
+    ) -> torch.Tensor:
+        return torch.zeros(sample_shape if sample_shape is not None else torch.Size())
+
+    monkeypatch.setattr(torch.distributions.Normal, "sample", zero_sample)
+    loc = torch.nn.functional.normalize(torch.randn(4, 2), dim=-1)
+    distribution = VonMisesFisher(loc, torch.full((4, 1), 10.0))
+
+    z = distribution.rsample()
+
+    assert torch.isfinite(z).all()

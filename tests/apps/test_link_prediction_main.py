@@ -96,6 +96,80 @@ def test_run_once_with_run_name_saves_a_loadable_checkpoint(tmp_path: Path) -> N
     assert posterior.rsample().shape == (_NUM_NODES, 3)
 
 
+def test_run_once_encoder_adjacency_none_matches_omitting_it() -> None:
+    """``encoder_adjacency``'s "no-op" default must not change existing behavior --
+    every real training command calls ``run_once`` without this parameter, so its
+    output must be byte-identical whether it is omitted or passed explicitly as
+    ``None``.
+    """
+    graph = _tiny_graph()
+    split = _tiny_split(graph)
+
+    omitted = run_once(
+        graph,
+        _tiny_split(graph),
+        GraphVAEConfig(family="tnbbeta", in_features=4, latent_dim=3),
+        lr=0.01,
+        epochs=5,
+        seed=0,
+        device=torch.device("cpu"),
+    )
+    explicit_none = run_once(
+        graph,
+        split,
+        GraphVAEConfig(family="tnbbeta", in_features=4, latent_dim=3),
+        lr=0.01,
+        epochs=5,
+        seed=0,
+        device=torch.device("cpu"),
+        encoder_adjacency=None,
+    )
+
+    assert omitted == explicit_none
+
+
+def test_run_once_encoder_adjacency_overrides_the_gcns_aggregation_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``encoder_adjacency``, when given, must be what the GCN actually aggregates
+    over -- not just threaded through without effect. Spies on
+    ``GraphVAE.posterior_and_prior`` (where ``batch.norm_adjacency`` is consumed) to
+    assert on the real input the model receives, rather than trusting the plumbing.
+    """
+    graph = _tiny_graph()
+    split = _tiny_split(graph)
+    identity = sp.identity(_NUM_NODES, format="csr", dtype="float32")
+
+    seen_norm_adjacency: list[torch.Tensor] = []
+    real_posterior_and_prior = GraphVAE.posterior_and_prior
+
+    def _spy(self: GraphVAE, batch: GraphBatch) -> tuple[object, object]:
+        seen_norm_adjacency.append(batch.norm_adjacency)
+        return real_posterior_and_prior(self, batch)
+
+    monkeypatch.setattr(GraphVAE, "posterior_and_prior", _spy)
+
+    run_once(
+        graph,
+        split,
+        GraphVAEConfig(family="tnbbeta", in_features=4, latent_dim=3),
+        lr=0.01,
+        epochs=1,
+        seed=0,
+        device=torch.device("cpu"),
+        encoder_adjacency=identity,
+    )
+
+    assert len(seen_norm_adjacency) >= 1
+    used = seen_norm_adjacency[0].to_dense()
+    assert torch.allclose(used, torch.eye(_NUM_NODES))
+    # Sanity: the real graph's normalized adjacency is NOT the identity (the ring
+    # graph's edges give it nonzero off-diagonal entries) -- confirms this test
+    # would fail if encoder_adjacency were silently ignored.
+    real_norm = normalized_adjacency(split.train_adjacency).to_dense()
+    assert not torch.allclose(real_norm, torch.eye(_NUM_NODES))
+
+
 def test_run_once_multiple_seeds_each_get_their_own_checkpoint() -> None:
     graph = _tiny_graph()
     split = _tiny_split(graph)
