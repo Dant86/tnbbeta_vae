@@ -1,0 +1,54 @@
+\pdfoutput=1
+\documentclass[12pt]{article}
+% Load preamble (packages, math, definitions, comments)
+\input{preamble}
+% Bibliography: natbib (for biblatex, see preamble/minimalist_biblatex.tex)
+\usepackage{natbib}
+% Provides author/affiliation formatting with italic affiliations
+\usepackage[affil-it]{authblk}
+
+\title{The SphericalTNBBeta Distribution and its Applications to Variational Autoencoders}
+% \date{}
+\author[1]{Vedant Pathak}
+
+\affil[1]{Department of Statistics, University of Chicago}
+\date{November 12\textsuperscript{th}, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+    \input{sections/0_abstract.tex}
+\end{abstract}
+
+\section{Introduction}
+\input{sections/1_introduction.tex}
+
+\section{From the Unit Interval to the Unit Hypersphere}
+\input{sections/2_unit_interval_to_hypersphere.tex}
+
+\section{The TNBBeta and SphericalTNBBeta Distributions}
+\input{sections/3_tnbbeta.tex}
+
+\section{Experiments}
+\input{sections/4_experiments.tex}
+
+\section{Conclusion}
+\input{sections/5_conclusion.tex}
+
+\section*{Acknowledgements}
+\input{sections/6p5_acknowledgements.tex}
+
+\section*{Generative AI Attestation}
+\input{sections/6p75_ai_ack.tex}
+
+\appendix
+\section{Proofs}
+\input{sections/6_proofs.tex}
+\section{Additional Visualizations}
+\input{sections/7_viz.tex}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
