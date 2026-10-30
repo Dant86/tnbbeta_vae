@@ -88,6 +88,7 @@ venv = ".venv"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=tnbbeta_vae --cov-report=term-missing --cov-report=xml"
+markers = ["real_render: renders images through kaleido/Chrome (slow); opt in with -m real_render"]
 
 [tool.coverage.run]
 source = ["src/tnbbeta_vae"]
