@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "LatentFamily",
+    "epsilon_from_m",
     "gaussian_posterior",
     "head_size",
     "posterior_centre",
@@ -102,6 +103,32 @@ def tnbbeta_posterior(
     p = raw_p.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     q = raw_q.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     return TNBBetaSpherical(mean_direction, p, q, epsilon)
+
+
+def epsilon_from_m(m: float, latent_dim: int) -> float:
+    """Returns the epsilon with offset ``m = epsilon - (latent_dim - 1) / 2``.
+
+    ``m < 0`` is the (proven necessary and sufficient) bimodal regime of
+    ``TNBBetaSpherical``; ``m = 0`` is the threshold.
+
+    Args:
+        m: Desired offset from the modality threshold.
+        latent_dim: Ambient dimension of the sphere.
+
+    Returns:
+        ``m + (latent_dim - 1) / 2``.
+
+    Raises:
+        ValueError: If the resulting epsilon is not positive (``m`` at or below
+            ``-(latent_dim - 1) / 2``).
+    """
+    epsilon = m + (latent_dim - 1) / 2
+    if epsilon <= 0:
+        raise ValueError(
+            f"m={m} gives epsilon={epsilon} <= 0 at latent_dim={latent_dim}; "
+            f"m must exceed {-(latent_dim - 1) / 2}."
+        )
+    return epsilon
 
 
 def vmf_posterior(raw_mean: Tensor, raw_kappa: Tensor) -> VonMisesFisher:

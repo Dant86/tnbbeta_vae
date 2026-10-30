@@ -47,6 +47,7 @@ from tnbbeta_vae.data.planetoid import (
 from tnbbeta_vae.data.snap_community import Graph as SnapGraph
 from tnbbeta_vae.data.snap_community import identity_features, load_snap_community
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
+from tnbbeta_vae.models.heads import epsilon_from_m
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import select_device
@@ -81,6 +82,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--fixed-temperature", type=float, default=None)
     parser.add_argument("--feature-reconstruction-weight", type=float, default=0.0)
     parser.add_argument(
+        "--fixed-m",
+        type=float,
+        default=None,
+        help="TNBBeta only: hold epsilon fixed at m + (latent_dim - 1) / 2 for every "
+        "node (m < 0 is the bimodal regime). Output paths use '<label>_m<m>' so a "
+        "fixed-m run never collides with the free-epsilon one. Omit to learn epsilon.",
+    )
+    parser.add_argument(
         "--ignore-features",
         action="store_true",
         help="Replace the loaded graph's real features with an identity matrix "
@@ -88,6 +97,16 @@ def main(argv: list[str] | None = None) -> None:
         "isolating 'features present vs. absent' as its own controlled variable. "
         "Output paths and checkpoints use '<dataset>_nofeat' instead of '<dataset>' "
         "so a features-off run never collides with its features-on counterpart.",
+    )
+    parser.add_argument(
+        "--results-name",
+        type=str,
+        default=None,
+        help="Stem of the summary JSON, written to "
+        "$TNBBETA_CHECKPOINT_DIR/link_prediction/<results-name>.json. Default: "
+        "'<label>_<family>' -- the path every full grid-search run owns, so any "
+        "single-configuration or per-seed run (an ablation, a sweep cell) should set "
+        "this, or it overwrites that grid search's results.",
     )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument(
@@ -126,6 +145,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.ignore_features:
         graph.features = identity_features(graph.features.shape[0])
     label = f"{args.dataset}_nofeat" if args.ignore_features else args.dataset
+    if args.fixed_m is not None:
+        label = f"{label}_m{args.fixed_m:g}"
     splits = {seed: split_edges(graph.adjacency, seed=seed) for seed in args.seeds}
 
     summaries: list[dict[str, Any]] = []
@@ -143,6 +164,11 @@ def main(argv: list[str] | None = None) -> None:
                     dropout=dropout,
                     fixed_temperature=args.fixed_temperature,
                     feature_reconstruction_weight=args.feature_reconstruction_weight,
+                    fixed_epsilon=(
+                        None
+                        if args.fixed_m is None
+                        else epsilon_from_m(args.fixed_m, latent_dim)
+                    ),
                 ),
                 lr=lr,
                 epochs=epochs,
@@ -170,7 +196,8 @@ def main(argv: list[str] | None = None) -> None:
         "selected": selected,
         "configurations": summaries,
     }
-    output = checkpoint_dir() / "link_prediction" / f"{label}_{args.family}.json"
+    results_name = args.results_name or f"{label}_{args.family}"
+    output = checkpoint_dir() / "link_prediction" / f"{results_name}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2))
     print(f"Selected {json.dumps(selected)}\nWrote {output}")
