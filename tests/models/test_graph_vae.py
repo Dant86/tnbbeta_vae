@@ -15,6 +15,7 @@ from apps.link_prediction import main as link_main
 from apps.link_prediction import table as link_table
 from tnbbeta_vae.data.planetoid import Graph, normalized_adjacency, split_edges
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
+from tnbbeta_vae.models.heads import head_size
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
 from tnbbeta_vae.registry import list_registered_models
 
@@ -439,3 +440,73 @@ def test_sparse_identity_features_train_without_densifying(family: Any) -> None:
     assert embeddings.shape == (100, 4)
     if family != "gaussian":
         assert torch.allclose(embeddings.norm(dim=-1), torch.ones(100), atol=1e-4)
+
+
+def test_fixed_epsilon_shrinks_head_and_pins_epsilon() -> None:
+    free = GraphVAE(GraphVAEConfig(family="tnbbeta", in_features=6, latent_dim=4))
+    fixed = GraphVAE(
+        GraphVAEConfig(family="tnbbeta", in_features=6, latent_dim=4, fixed_epsilon=2.5)
+    )
+
+    assert fixed.second.out_features == free.second.out_features - 1
+    raw = torch.randn(5, fixed.second.out_features)
+    posterior = fixed._posterior(raw)  # noqa: SLF001
+    assert torch.allclose(posterior.epsilon, torch.full((5,), 2.5))  # type: ignore[attr-defined]
+
+
+def test_fixed_epsilon_none_leaves_state_dict_shape_unchanged() -> None:
+    config = GraphVAEConfig(family="tnbbeta", in_features=6, latent_dim=4)
+
+    assert config.fixed_epsilon is None
+    assert GraphVAE(config).second.out_features == head_size("tnbbeta", 4)
+
+
+def test_results_name_keeps_a_single_run_from_clobbering_the_grid_search_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TNBBETA_CHECKPOINT_DIR", str(tmp_path))
+    grid_search_json = tmp_path / "link_prediction" / "cora_tnbbeta.json"
+    grid_search_json.parent.mkdir(parents=True)
+    grid_search_json.write_text("original")
+    monkeypatch.setenv("TNBBETA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(link_main, "load_planetoid", lambda *_: _community_graph())
+
+    link_main.main(
+        [
+            "--dataset", "cora", "--family", "tnbbeta", "--lrs", "0.01",
+            "--dropouts", "0", "--latent-dims", "4", "--epochs", "2",
+            "--seeds", "0", "--device", "cpu", "--results-name", "one_cell",
+        ]
+    )  # fmt: skip
+
+    assert grid_search_json.read_text() == "original"
+    assert (tmp_path / "link_prediction" / "one_cell.json").exists()
+
+
+@pytest.mark.parametrize("family", ["vmf", "power_spherical"])
+def test_fixed_kappa_shrinks_head_and_pins_kappa(family: str) -> None:
+    config = {"family": family, "in_features": 6, "latent_dim": 4}
+    free = GraphVAE(GraphVAEConfig(**config))  # type: ignore[arg-type]
+    fixed = GraphVAE(GraphVAEConfig(**config, fixed_kappa=9.0))  # type: ignore[arg-type]
+
+    assert fixed.second.out_features == free.second.out_features - 1
+    posterior = fixed._posterior(torch.randn(5, fixed.second.out_features))  # noqa: SLF001
+    kappa = posterior.scale if family == "vmf" else posterior.kappa  # type: ignore[attr-defined]
+    assert torch.allclose(kappa.reshape(-1), torch.full((5,), 9.0))
+    assert posterior.rsample().shape == (5, 4)
+
+
+@pytest.mark.parametrize("family", ["tnbbeta", "gaussian"])
+def test_fixed_kappa_rejects_families_without_a_kappa(family: str) -> None:
+    with pytest.raises(ValueError, match="fixed_kappa"):
+        GraphVAE(
+            GraphVAEConfig(family=family, in_features=6, latent_dim=4, fixed_kappa=3.0)  # type: ignore[arg-type]
+        )
+
+
+def test_fixed_kappa_out_of_range_is_rejected() -> None:
+    model = GraphVAE(
+        GraphVAEConfig(family="vmf", in_features=6, latent_dim=4, fixed_kappa=0.5)
+    )
+    with pytest.raises(ValueError, match="kappa"):
+        model._posterior(torch.randn(2, model.second.out_features))  # noqa: SLF001

@@ -47,7 +47,9 @@ from tnbbeta_vae.data.planetoid import (
 from tnbbeta_vae.data.snap_community import Graph as SnapGraph
 from tnbbeta_vae.data.snap_community import identity_features, load_snap_community
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
+from tnbbeta_vae.models.heads import epsilon_from_m
 from tnbbeta_vae.models.losses.ranking import average_precision, roc_auc
+from tnbbeta_vae.models.posterior_stats import posterior_stats
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import select_device
 
@@ -81,6 +83,29 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--fixed-temperature", type=float, default=None)
     parser.add_argument("--feature-reconstruction-weight", type=float, default=0.0)
     parser.add_argument(
+        "--fixed-m",
+        type=float,
+        default=None,
+        help="TNBBeta only: hold epsilon fixed at m + (latent_dim - 1) / 2 for every "
+        "node (m < 0 is the bimodal regime). Output paths use '<label>_m<m>' so a "
+        "fixed-m run never collides with the free-epsilon one. Omit to learn epsilon.",
+    )
+    parser.add_argument(
+        "--fixed-kappa",
+        type=float,
+        default=None,
+        help="vMF / power-spherical only: hold kappa fixed at this value for every "
+        "node. Output paths use '<label>_k<kappa>'. Omit to learn kappa.",
+    )
+    parser.add_argument(
+        "--log-trajectory",
+        action="store_true",
+        help="Also write '<results-name>_trajectory.json': per-epoch concentration "
+        "(kappa for vMF / power-spherical), r_bar, loss terms, gradient norms and "
+        "validation AUC for every (configuration, seed), plus the untrained "
+        "initialization as epoch -1. Does not change the training results.",
+    )
+    parser.add_argument(
         "--ignore-features",
         action="store_true",
         help="Replace the loaded graph's real features with an identity matrix "
@@ -88,6 +113,16 @@ def main(argv: list[str] | None = None) -> None:
         "isolating 'features present vs. absent' as its own controlled variable. "
         "Output paths and checkpoints use '<dataset>_nofeat' instead of '<dataset>' "
         "so a features-off run never collides with its features-on counterpart.",
+    )
+    parser.add_argument(
+        "--results-name",
+        type=str,
+        default=None,
+        help="Stem of the summary JSON, written to "
+        "$TNBBETA_CHECKPOINT_DIR/link_prediction/<results-name>.json. Default: "
+        "'<label>_<family>' -- the path every full grid-search run owns, so any "
+        "single-configuration or per-seed run (an ablation, a sweep cell) should set "
+        "this, or it overwrites that grid search's results.",
     )
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument(
@@ -126,32 +161,52 @@ def main(argv: list[str] | None = None) -> None:
     if args.ignore_features:
         graph.features = identity_features(graph.features.shape[0])
     label = f"{args.dataset}_nofeat" if args.ignore_features else args.dataset
+    if args.fixed_m is not None:
+        label = f"{label}_m{args.fixed_m:g}"
+    if args.fixed_kappa is not None:
+        label = f"{label}_k{args.fixed_kappa:g}"
+    trajectories: dict[str, list[dict[str, float]]] = {}
     splits = {seed: split_edges(graph.adjacency, seed=seed) for seed in args.seeds}
 
     summaries: list[dict[str, Any]] = []
     for lr, dropout, latent_dim in itertools.product(
         args.lrs, args.dropouts, args.latent_dims
     ):
-        runs = [
-            run_once(
-                graph,
-                splits[seed],
-                GraphVAEConfig(
-                    family=cast("Any", args.family),
-                    in_features=graph.features.shape[1],
-                    latent_dim=latent_dim,
-                    dropout=dropout,
-                    fixed_temperature=args.fixed_temperature,
-                    feature_reconstruction_weight=args.feature_reconstruction_weight,
-                ),
-                lr=lr,
-                epochs=epochs,
-                seed=seed,
-                device=device,
-                run_name=args.run_name,
+        runs = []
+        for seed in args.seeds:
+            history: list[dict[str, float]] | None = [] if args.log_trajectory else None
+            runs.append(
+                run_once(
+                    graph,
+                    splits[seed],
+                    GraphVAEConfig(
+                        family=cast("Any", args.family),
+                        in_features=graph.features.shape[1],
+                        latent_dim=latent_dim,
+                        dropout=dropout,
+                        fixed_temperature=args.fixed_temperature,
+                        feature_reconstruction_weight=(
+                            args.feature_reconstruction_weight
+                        ),
+                        fixed_epsilon=(
+                            None
+                            if args.fixed_m is None
+                            else epsilon_from_m(args.fixed_m, latent_dim)
+                        ),
+                        fixed_kappa=args.fixed_kappa,
+                    ),
+                    lr=lr,
+                    epochs=epochs,
+                    seed=seed,
+                    device=device,
+                    run_name=args.run_name,
+                    trajectory=history,
+                )
             )
-            for seed in args.seeds
-        ]
+            if history is not None:
+                trajectories[
+                    f"lr{lr:g}_dropout{dropout:g}_d{latent_dim}_seed{seed}"
+                ] = history
         summary = {
             "lr": lr,
             "dropout": dropout,
@@ -170,9 +225,14 @@ def main(argv: list[str] | None = None) -> None:
         "selected": selected,
         "configurations": summaries,
     }
-    output = checkpoint_dir() / "link_prediction" / f"{label}_{args.family}.json"
+    results_name = args.results_name or f"{label}_{args.family}"
+    output = checkpoint_dir() / "link_prediction" / f"{results_name}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2))
+    if args.log_trajectory:
+        trajectory_path = output.with_name(f"{results_name}_trajectory.json")
+        trajectory_path.write_text(json.dumps(trajectories))
+        print(f"Wrote {trajectory_path}")
     print(f"Selected {json.dumps(selected)}\nWrote {output}")
 
 
@@ -187,6 +247,7 @@ def run_once(
     device: torch.device,
     run_name: str | None = None,
     encoder_adjacency: SparseMatrix | None = None,
+    trajectory: list[dict[str, float]] | None = None,
 ) -> dict[str, float]:
     """Trains one model and returns the metrics at its best-validation epoch.
 
@@ -218,6 +279,10 @@ def run_once(
             graph's edges. ``None`` (the default) preserves this function's
             original behavior exactly: the encoder also aggregates over
             ``normalized_adjacency(split.train_adjacency)``.
+        trajectory: If given, a list that receives one dict of training-dynamics
+            statistics per logged epoch (see :func:`_snapshot`), with ``epoch = -1``
+            for the untrained initialization. Sampling for the statistics runs under a
+            forked RNG, so the returned metrics are identical with or without it.
 
     Returns:
         ``val_auc``, ``val_ap``, ``test_auc``, ``test_ap`` and ``best_epoch``, plus
@@ -259,15 +324,24 @@ def run_once(
     best_val_auc = -1.0
     best_state_dict: dict[str, torch.Tensor] | None = None
     diverged = 0.0
+    if trajectory is not None:
+        model.eval()
+        init_embeddings = model.embeddings(batch).cpu()
+        init_val_auc, _ = score_edges(
+            init_embeddings, split.val_positive, split.val_negative
+        )
+        trajectory.append(_snapshot(model, batch, -1, init_val_auc, {}))
     for epoch in range(epochs):
         model.train()
         optimizer.zero_grad()
-        loss = model.training_step(batch)["loss"]
+        terms = model.training_step(batch)
+        loss = terms["loss"]
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))
         if not (torch.isfinite(loss) and torch.isfinite(grad_norm)):
             diverged = 1.0
             break
+        head_grad = _head_row_grad_norms(model) if trajectory is not None else {}
         optimizer.step()
 
         model.eval()
@@ -275,6 +349,22 @@ def run_once(
         val_auc, val_ap = score_edges(
             embeddings, split.val_positive, split.val_negative
         )
+        if trajectory is not None and (epoch < 10 or epoch % 5 == 0):
+            trajectory.append(
+                _snapshot(
+                    model,
+                    batch,
+                    epoch,
+                    val_auc,
+                    {
+                        "loss": float(loss.detach()),
+                        "link_loss": float(terms["link_loss"]),
+                        "kl": float(terms["kl"]),
+                        "grad_norm": float(grad_norm),
+                        **head_grad,
+                    },
+                )
+            )
         if val_auc > best_val_auc:
             best_val_auc = val_auc
             test_auc, test_ap = score_edges(
@@ -297,6 +387,77 @@ def run_once(
         _save_checkpoint(run_name, seed, config, best_state_dict)
 
     return {**best, "diverged": diverged}
+
+
+def _head_row_grad_norms(model: GraphVAE) -> dict[str, float]:
+    """Gradient norms of the head's rows: the concentration row vs. the direction rows.
+
+    The head is bias-free, so row ``i`` of ``model.second.weight`` is output ``i``. Only
+    vMF and power-spherical (concentration is the last output) report the split; other
+    families report the mean over all rows.
+    """
+    grad = model.second.weight.grad
+    if grad is None:
+        return {}
+    rows = grad.norm(dim=1)
+    config = model.config
+    if config.family in ("vmf", "power_spherical") and config.fixed_kappa is None:
+        return {
+            "grad_norm_kappa_row": float(rows[-1]),
+            "grad_norm_direction_rows": float(rows[:-1].mean()),
+        }
+    return {"grad_norm_head_rows": float(rows.mean())}
+
+
+def _snapshot(
+    model: GraphVAE,
+    batch: GraphBatch,
+    epoch: int,
+    val_auc: float,
+    extra: dict[str, float],
+) -> dict[str, float]:
+    """One epoch's posterior statistics: concentration, r_bar and family parameters.
+
+    Draws samples for ``r_bar`` under a forked RNG so training's own randomness
+    (negative sampling, dropout) is unaffected.
+    """
+    device = batch.features.device
+    with (
+        torch.no_grad(),
+        torch.random.fork_rng(devices=[device] if device.type == "cuda" else []),
+    ):
+        posterior, _ = model.posterior_and_prior(batch)
+        everyone = torch.ones(batch.num_nodes, dtype=torch.bool, device=device)
+        stats = posterior_stats(posterior, everyone, model.config.model_dump())
+        snapshot: dict[str, float] = {
+            "epoch": float(epoch),
+            "val_auc": val_auc,
+            "temperature": float(model.temperature()),
+            "r_bar": stats["r_bar"],
+            **{
+                key: value
+                for key, value in stats.items()
+                if key.startswith(("p_", "q_", "epsilon_", "m_", "frac_"))
+            },
+            **extra,
+        }
+        kappa = None
+        if model.config.family == "vmf":
+            kappa = posterior.scale.reshape(-1)  # type: ignore[attr-defined]
+        elif model.config.family == "power_spherical":
+            kappa = posterior.kappa  # type: ignore[attr-defined]
+        if kappa is not None:
+            snapshot.update(
+                kappa_mean=float(kappa.mean()),
+                kappa_median=float(kappa.median()),
+                kappa_min=float(kappa.min()),
+                kappa_max=float(kappa.max()),
+            )
+        if model.config.family == "gaussian":
+            snapshot["sigma_mean"] = float(
+                posterior.base_dist.scale.mean()  # type: ignore[attr-defined]
+            )
+    return snapshot
 
 
 def _save_checkpoint(

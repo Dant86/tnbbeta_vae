@@ -21,10 +21,12 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 from tnbbeta_vae.models.heads import (
     LatentFamily,
+    fixed_kappa_posterior,
     head_size,
     posterior_centre,
     posterior_from_raw,
     standard_prior,
+    tnbbeta_posterior,
 )
 from tnbbeta_vae.models.pairwise import pairwise_logits
 from tnbbeta_vae.registry import register_model
@@ -90,6 +92,16 @@ class GraphVAEConfig(BaseModel):
             as Planetoid's bag-of-words features are) and adds
             ``feature_reconstruction_weight * <binary cross-entropy>`` to the
             training loss.
+        fixed_epsilon: For ``family="tnbbeta"`` only: if set, every node's posterior
+            gets this constant epsilon instead of a predicted one (the head then
+            predicts one fewer output), mirroring ``MlpVAEConfig.fixed_epsilon``.
+            ``None`` (default) leaves epsilon learned and the head's shape
+            unchanged, so existing checkpoints still load.
+        fixed_kappa: For ``family="vmf"`` or ``"power_spherical"`` only: if set, every
+            node's posterior gets this constant concentration instead of a predicted
+            one (the head then predicts one fewer output). ``None`` (default) leaves
+            kappa learned and the head's shape unchanged, so existing checkpoints
+            still load.
     """
 
     family: LatentFamily = "tnbbeta"
@@ -99,6 +111,8 @@ class GraphVAEConfig(BaseModel):
     dropout: float = 0.0
     fixed_temperature: float | None = None
     feature_reconstruction_weight: float = 0.0
+    fixed_epsilon: float | None = None
+    fixed_kappa: float | None = None
 
 
 @register_model("graph_vae", config_cls=GraphVAEConfig)
@@ -114,9 +128,17 @@ class GraphVAE(nn.Module):
         super().__init__()
         self.config = config
         self.first = nn.Linear(config.in_features, config.hidden_dim, bias=False)
-        self.second = nn.Linear(
-            config.hidden_dim, head_size(config.family, config.latent_dim), bias=False
-        )
+        posterior_head_size = head_size(config.family, config.latent_dim)
+        if config.family == "tnbbeta" and config.fixed_epsilon is not None:
+            posterior_head_size -= 1
+        if config.fixed_kappa is not None:
+            if config.family not in ("vmf", "power_spherical"):
+                raise ValueError(
+                    f"fixed_kappa needs family 'vmf' or 'power_spherical'; "
+                    f"got {config.family!r}."
+                )
+            posterior_head_size -= 1
+        self.second = nn.Linear(config.hidden_dim, posterior_head_size, bias=False)
         self.dropout = nn.Dropout(config.dropout)
         self.log_temperature = nn.Parameter(
             torch.tensor(math.log(_INITIAL_TEMPERATURE)),
@@ -239,6 +261,14 @@ class GraphVAE(nn.Module):
         return posterior_centre(self.config.family, posterior)
 
     def _posterior(self, raw: Tensor) -> Distribution:
+        if self.config.family == "tnbbeta":
+            return tnbbeta_posterior(
+                raw, self.config.latent_dim, fixed_epsilon=self.config.fixed_epsilon
+            )
+        if self.config.fixed_kappa is not None:
+            return fixed_kappa_posterior(
+                self.config.family, raw, self.config.fixed_kappa
+            )
         return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
 
     def _prior(self, raw: Tensor) -> Distribution:

@@ -4,7 +4,7 @@ Usage:
     uv run python -m apps.synthetic.sbm_recovery [--out-dir DIR] \
         [--num-communities 10] [--nodes-per-community 50] \
         [--p-in 0.3] [--p-out 0.01] [--feature-noise-std NONE] \
-        [--latent-dim 16] [--epochs 200] \
+        [--latent-dim 16] [--fixed-m NONE] [--epochs 200] \
         [--graph-seed 0] [--seed 0] [--run-name sbm_recovery] \
         [--families gaussian vmf power_spherical tnbbeta]
 
@@ -68,6 +68,7 @@ from apps.link_prediction.main import run_once
 from tnbbeta_vae.data.planetoid import split_edges
 from tnbbeta_vae.data.stochastic_block_model import stochastic_block_model
 from tnbbeta_vae.models import GraphVAEConfig
+from tnbbeta_vae.models.heads import epsilon_from_m
 from tnbbeta_vae.models.posterior_stats import posterior_stats
 from tnbbeta_vae.paths import checkpoint_dir
 from tnbbeta_vae.training import load_model_checkpoint, select_device
@@ -120,6 +121,17 @@ def main(argv: list[str] | None = None) -> None:
             " other comparison point in this investigation (Planetoid/com-DBLP"
             " GraphVAE runs, and pairwise_cluster_recovery's (b) ablation) exactly,"
             " for direct m/epsilon comparability."
+        ),
+    )
+    parser.add_argument(
+        "--fixed-m",
+        type=float,
+        default=None,
+        help=(
+            "TNBBeta only: hold epsilon fixed at m + (latent_dim - 1) / 2 for every"
+            " node (m < 0 is the bimodal regime). Ignored by the other families."
+            " Omitting this flag (the default, None) learns epsilon, exactly as"
+            " before."
         ),
     )
     parser.add_argument("--hidden-dim", type=int, default=32)
@@ -208,6 +220,11 @@ def main(argv: list[str] | None = None) -> None:
             hidden_dim=args.hidden_dim,
             latent_dim=args.latent_dim,
             dropout=args.dropout,
+            fixed_epsilon=(
+                None
+                if args.fixed_m is None
+                else epsilon_from_m(args.fixed_m, args.latent_dim)
+            ),
         )
         metrics = run_once(
             graph,
@@ -257,7 +274,9 @@ def _posterior_stats_for_checkpoint(
     with torch.no_grad():
         posterior, _ = model.posterior_and_prior(batch)  # type: ignore[attr-defined]
     all_nodes = torch.ones(batch.num_nodes, dtype=torch.bool)
-    return posterior_stats(posterior, all_nodes, checkpoint["config"])
+    stats = posterior_stats(posterior, all_nodes, checkpoint["config"])
+    temperature = model.temperature()  # type: ignore[attr-defined]
+    return {**stats, "temperature": float(temperature)}
 
 
 if __name__ == "__main__":

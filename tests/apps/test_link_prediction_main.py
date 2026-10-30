@@ -189,3 +189,60 @@ def test_run_once_multiple_seeds_each_get_their_own_checkpoint() -> None:
 
     assert (checkpoint_dir() / "dblp_vmf_seed0" / "final.pt").exists()
     assert (checkpoint_dir() / "dblp_vmf_seed1" / "final.pt").exists()
+
+
+@pytest.mark.parametrize("family", ["vmf", "power_spherical", "tnbbeta", "gaussian"])
+def test_run_once_trajectory_does_not_change_the_results(family: str) -> None:
+    """Logging samples for r_bar; under a forked RNG that must not shift training."""
+    graph = _tiny_graph()
+    config = GraphVAEConfig(family=family, in_features=4, latent_dim=3)  # type: ignore[arg-type]
+    kwargs = {"lr": 0.01, "epochs": 12, "seed": 0, "device": torch.device("cpu")}
+
+    plain = run_once(graph, _tiny_split(graph), config, **kwargs)  # type: ignore[arg-type]
+    history: list[dict[str, float]] = []
+    logged = run_once(graph, _tiny_split(graph), config, trajectory=history, **kwargs)  # type: ignore[arg-type]
+
+    assert plain == logged
+    assert history[0]["epoch"] == -1.0
+    assert [row["epoch"] for row in history[1:4]] == [0.0, 1.0, 2.0]
+    assert all(0.0 <= row["r_bar"] <= 1.0 for row in history if family != "gaussian")
+
+
+def test_run_once_trajectory_logs_kappa_and_the_kappa_row_gradient() -> None:
+    graph = _tiny_graph()
+    history: list[dict[str, float]] = []
+    run_once(
+        graph,
+        _tiny_split(graph),
+        GraphVAEConfig(family="vmf", in_features=4, latent_dim=3),
+        lr=0.01,
+        epochs=3,
+        seed=0,
+        device=torch.device("cpu"),
+        trajectory=history,
+    )
+
+    assert 1.0 < history[0]["kappa_mean"] < 3.0
+    assert "grad_norm_kappa_row" not in history[0]
+    assert history[1]["grad_norm_kappa_row"] > 0
+    assert "grad_norm_direction_rows" in history[1]
+
+
+def test_run_once_fixed_kappa_pins_kappa_and_has_no_kappa_gradient_row() -> None:
+    graph = _tiny_graph()
+    history: list[dict[str, float]] = []
+    run_once(
+        graph,
+        _tiny_split(graph),
+        GraphVAEConfig(
+            family="power_spherical", in_features=4, latent_dim=3, fixed_kappa=7.0
+        ),
+        lr=0.01,
+        epochs=3,
+        seed=0,
+        device=torch.device("cpu"),
+        trajectory=history,
+    )
+
+    assert all(row["kappa_min"] == row["kappa_max"] == 7.0 for row in history)
+    assert "grad_norm_kappa_row" not in history[1]
