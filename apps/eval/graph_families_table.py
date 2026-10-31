@@ -130,7 +130,7 @@ def kind_table(conditions: dict[str, list[dict]]) -> str:
 
 
 def shape_table(conditions: dict[str, list[dict]]) -> str:
-    """Markdown table of ``r_bar``, second-mode mass and (TNBBeta) ``m`` per condition."""
+    """Markdown table of ``r_bar``, second-mode mass and (TNBBeta) ``m``."""
     columns = ["r_bar", "second_mode_mass", "frac_nodes_second_mode", "m_mean"]
     lines = [
         "| condition | " + " | ".join(columns) + " |",
