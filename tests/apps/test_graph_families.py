@@ -51,3 +51,4 @@ def test_train_and_evaluate_reports_finite_metrics_for_centres_and_samples(
     assert set(result["posterior_by_block"]) == {"0", "1", "2"}
     assert 0.0 < result["posterior"]["r_bar"] <= 1.0
     assert ("frac_bimodal" in result["posterior"]) == (family == "tnbbeta")
+    assert 0.0 <= result["posterior"]["antipodal_mass"] <= 1.0

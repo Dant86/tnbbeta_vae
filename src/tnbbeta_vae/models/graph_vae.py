@@ -102,6 +102,11 @@ class GraphVAEConfig(BaseModel):
             one (the head then predicts one fewer output). ``None`` (default) leaves
             kappa learned and the head's shape unchanged, so existing checkpoints
             still load.
+        decoder_bias: If ``True``, adds one learned scalar to every pair's logit (all
+            families). Off by default, and the parameter exists only when on, so
+            existing checkpoints still load. Needed when the true edge probability
+            has a base rate below one half that an inner product alone cannot reach
+            (``data.structured_graph.latent_sphere_graph``).
     """
 
     family: LatentFamily = "tnbbeta"
@@ -113,6 +118,7 @@ class GraphVAEConfig(BaseModel):
     feature_reconstruction_weight: float = 0.0
     fixed_epsilon: float | None = None
     fixed_kappa: float | None = None
+    decoder_bias: bool = False
 
 
 @register_model("graph_vae", config_cls=GraphVAEConfig)
@@ -147,6 +153,9 @@ class GraphVAE(nn.Module):
         # Constructed only when requested: an unconditionally-built, zero-weighted
         # decoder would still add parameters, breaking strict load_state_dict on
         # every checkpoint trained before this field existed (see CLAUDE.md).
+        self.bias: nn.Parameter | None = (
+            nn.Parameter(torch.zeros(())) if config.decoder_bias else None
+        )
         self.feature_decoder: nn.Linear | None = None
         if config.feature_reconstruction_weight > 0:
             self.feature_decoder = nn.Linear(config.latent_dim, config.in_features)
@@ -240,7 +249,14 @@ class GraphVAE(nn.Module):
         Returns:
             Inner products, times the temperature for the sphere families.
         """
-        return pairwise_logits(z, edges, self.config.family, self.temperature())
+        logits = pairwise_logits(z, edges, self.config.family, self.temperature())
+        return logits if self.bias is None else logits + self.bias
+
+    def logit_bias(self) -> Tensor:
+        """Returns the scalar added to every logit (zero without ``decoder_bias``)."""
+        if self.bias is None:
+            return torch.zeros((), device=self.log_temperature.device)
+        return self.bias
 
     def temperature(self) -> Tensor:
         """Returns the multiplier applied to inner products of unit vectors."""

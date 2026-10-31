@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
+import torch
 
 from tnbbeta_vae.data.block_graph import BlockGraph
 from tnbbeta_vae.data.structured_graph import (
@@ -84,3 +85,20 @@ def test_mixed_membership_overlap_lowers_the_within_community_probability() -> N
     pure_diff = sample.probability[sample.kind == "pure-diff"].mean()
 
     assert pure_same > 3 * pure_diff
+
+
+def test_latent_kernel_balanced_target_is_a_shifted_logistic_of_the_cosine() -> None:
+    from tnbbeta_vae.data.structured_graph import latent_kernel_graph
+    from tnbbeta_vae.models.predictive import balanced_truth
+
+    sample = latent_kernel_graph(num_nodes=150, scale=5.0, seed=0)
+    target = balanced_truth(torch.as_tensor(sample.probability, dtype=torch.float32))
+    off = ~np.eye(150, dtype=bool) & (sample.probability < 1.0)
+    logit = torch.logit(target.clamp(1e-6, 1 - 1e-6)).numpy()[off]
+    # logit(target) = scale * cos - ln M, so it is linear in log P with slope 1.
+    log_probability = np.log(sample.probability[off])
+
+    assert np.allclose(
+        np.diff(np.sort(logit)), np.diff(np.sort(log_probability)), atol=1e-3
+    )
+    assert abs(sample.adjacency.sum() / 150 - 18.0) < 4.0

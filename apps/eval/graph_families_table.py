@@ -49,22 +49,30 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--graph", nargs="+", default=sorted(PRESETS))
     parser.add_argument("--root", type=Path, default=None)
     parser.add_argument("--prefix", default="gf")
+    parser.add_argument("--conditions", nargs="+", default=CONDITIONS)
     args = parser.parse_args(argv)
     directory = (args.root or checkpoint_dir()) / "synthetic_graphs"
     for graph in args.graph:
-        conditions = collect(directory, graph, args.prefix)
+        conditions = collect(directory, graph, args.prefix, args.conditions)
         if not conditions:
             continue
         print(f"\n### {graph}\n")
         print(summary_table(conditions))
         print("\nSampled KL to the true pair probabilities, by pair kind\n")
         print(kind_table(conditions))
+        print("\nPosterior shape (seed means)\n")
+        print(shape_table(conditions))
 
 
-def collect(directory: Path, graph: str, prefix: str = "gf") -> dict[str, list[dict]]:
+def collect(
+    directory: Path,
+    graph: str,
+    prefix: str = "gf",
+    conditions: list[str] | None = None,
+) -> dict[str, list[dict]]:
     """Returns each condition's per-seed result dicts for ``graph``."""
     found = {}
-    for condition in CONDITIONS:
+    for condition in conditions or CONDITIONS:
         path = directory / f"{prefix}_{graph}_{condition}.json"
         if path.exists():
             found[condition] = json.loads(path.read_text())["runs"]
@@ -115,6 +123,24 @@ def kind_table(conditions: dict[str, list[dict]]) -> str:
                 if kind in run["sampled_truth_kl_by_kind"]
             ]
             cells.append(f"{np.mean(values):.3f}")
+        lines.append(f"| {name} | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+def shape_table(conditions: dict[str, list[dict]]) -> str:
+    """Markdown table of ``r_bar``, antipodal mass and (TNBBeta) ``m`` per condition."""
+    columns = ["r_bar", "antipodal_mass", "frac_nodes_antipodal", "m_mean"]
+    lines = [
+        "| condition | " + " | ".join(columns) + " |",
+        "|" + "---|" * (len(columns) + 1),
+    ]
+    for name, runs in conditions.items():
+        cells = []
+        for column in columns:
+            values = [
+                run["posterior"][column] for run in runs if column in run["posterior"]
+            ]
+            cells.append(f"{np.nanmean(values):.3f}" if values else "-")
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     return "\n".join(lines)
 

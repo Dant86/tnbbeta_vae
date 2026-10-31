@@ -48,6 +48,7 @@ from tnbbeta_vae.data.planetoid import (
     split_edges,
 )
 from tnbbeta_vae.data.structured_graph import (
+    latent_kernel_graph,
     latent_sphere_graph,
     mixed_membership_graph,
     ring_graph,
@@ -75,6 +76,7 @@ PRESETS: dict[str, Callable[[int], BlockGraph]] = {
     "bipartite": lambda seed: block_graph(bipartite_spec(), seed=seed),
     "core_periphery": lambda seed: block_graph(core_periphery_spec(), seed=seed),
     "latent_sphere": lambda seed: latent_sphere_graph(seed=seed),
+    "latent_kernel": lambda seed: latent_kernel_graph(seed=seed),
     "mixed_membership": lambda seed: mixed_membership_graph(seed=seed),
     "scale_free": lambda seed: scale_free_graph(seed=seed),
     "ring": lambda seed: ring_graph(seed=seed),
@@ -96,6 +98,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--fixed-m", type=float, default=None)
     parser.add_argument("--fixed-kappa", type=float, default=None)
+    parser.add_argument("--decoder-bias", action="store_true")
     parser.add_argument("--latent-dim", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--lr", type=float, default=0.01)
@@ -121,6 +124,7 @@ def main(argv: list[str] | None = None) -> None:
                 else epsilon_from_m(args.fixed_m, args.latent_dim)
             ),
             fixed_kappa=args.fixed_kappa,
+            decoder_bias=args.decoder_bias,
         )
         runs.append(
             {
@@ -209,7 +213,9 @@ def evaluate_graph_model(
         per pair kind, over non-training pairs), and ``posterior`` /
         ``posterior_by_block`` (``posterior_stats`` over every node and over each
         block: ``r_bar`` and, for TNBBeta, ``p`` / ``q`` / ``epsilon`` / ``m`` and
-        ``frac_bimodal``).
+        ``frac_bimodal``; ``posterior`` also holds ``antipodal_mass``, the share of
+        samples in the hemisphere opposite each node's mean direction, and
+        ``frac_nodes_antipodal`` the share of nodes with more than 10% there).
     """
     device = next(model.parameters()).device
     batch = GraphBatch(
@@ -265,6 +271,7 @@ def evaluate_graph_model(
         config = model.config.model_dump()
         everyone = torch.ones(sample.block.shape[0], dtype=torch.bool, device=device)
         result["posterior"] = posterior_stats(posterior, everyone, config)
+        result["posterior"].update(_antipodal_mass(posterior, num_samples))
         result["posterior_by_block"] = {
             str(b): posterior_stats(
                 posterior, torch.as_tensor(sample.block == b, device=device), config
@@ -272,6 +279,24 @@ def evaluate_graph_model(
             for b in np.unique(sample.block)
         }
     return result
+
+
+def _antipodal_mass(posterior: Any, num_samples: int) -> dict[str, float]:
+    """Mass a posterior puts opposite its mean direction (``nan`` for the Gaussian).
+
+    ``r_bar`` cancels for antipodal mixtures, so it cannot show how much of a bimodal
+    posterior's mass sits in the second mode; this counts samples with a negative inner
+    product with the node's mean direction instead.
+    """
+    direction = getattr(posterior, "mean_direction", getattr(posterior, "loc", None))
+    if direction is None:
+        return {"antipodal_mass": float("nan"), "frac_nodes_antipodal": float("nan")}
+    samples = posterior.rsample(torch.Size([num_samples]))
+    opposite = ((samples * direction).sum(-1) < 0).float().mean(dim=0)
+    return {
+        "antipodal_mass": float(opposite.mean()),
+        "frac_nodes_antipodal": float((opposite > 0.1).float().mean()),
+    }
 
 
 if __name__ == "__main__":

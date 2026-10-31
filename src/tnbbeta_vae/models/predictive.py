@@ -46,14 +46,15 @@ def dense_edge_probabilities(
         if model.config.family == "gaussian"
         else model.temperature().detach().cpu()
     )
+    bias = model.logit_bias().detach().cpu()
     if num_samples is None:
         centres = model.embeddings(batch).cpu()
-        return torch.sigmoid(scale * centres @ centres.T)
+        return torch.sigmoid(scale * centres @ centres.T + bias)
     posterior, _ = model.posterior_and_prior(batch)
     samples = posterior.rsample(torch.Size([num_samples])).cpu()
     total = torch.zeros(samples.shape[1], samples.shape[1])
     for sample in samples:
-        total += torch.sigmoid(scale * sample @ sample.T)
+        total += torch.sigmoid(scale * sample @ sample.T + bias)
     return total / num_samples
 
 

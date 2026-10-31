@@ -510,3 +510,30 @@ def test_fixed_kappa_out_of_range_is_rejected() -> None:
     )
     with pytest.raises(ValueError, match="kappa"):
         model._posterior(torch.randn(2, model.second.out_features))  # noqa: SLF001
+
+
+@pytest.mark.parametrize("family", ["gaussian", "vmf", "tnbbeta"])
+def test_decoder_bias_adds_a_parameter_only_when_requested(family: str) -> None:
+    default = GraphVAE(GraphVAEConfig(family=family, in_features=10, latent_dim=4))  # type: ignore[arg-type]
+    biased = GraphVAE(
+        GraphVAEConfig(family=family, in_features=10, latent_dim=4, decoder_bias=True)  # type: ignore[arg-type]
+    )
+
+    assert "bias" not in default.state_dict()
+    assert set(biased.state_dict()) - set(default.state_dict()) == {"bias"}
+    assert float(default.logit_bias()) == 0.0
+
+
+def test_decoder_bias_shifts_every_link_logit() -> None:
+    config = GraphVAEConfig(
+        family="vmf", in_features=10, latent_dim=4, decoder_bias=True
+    )
+    model = GraphVAE(config)
+    z = torch.nn.functional.normalize(torch.randn(6, 4), dim=-1)
+    edges = torch.tensor([[0, 1, 2], [3, 4, 5]])
+    before = model.link_logits(z, edges)
+    with torch.no_grad():
+        assert model.bias is not None
+        model.bias.fill_(-2.0)
+
+    assert torch.allclose(model.link_logits(z, edges), before - 2.0)

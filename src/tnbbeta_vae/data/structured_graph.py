@@ -25,6 +25,7 @@ import scipy.sparse as sp
 from tnbbeta_vae.data.block_graph import BlockGraph
 
 __all__ = [
+    "latent_kernel_graph",
     "latent_sphere_graph",
     "mixed_membership_graph",
     "ring_graph",
@@ -58,6 +59,45 @@ def latent_sphere_graph(
     z /= np.linalg.norm(z, axis=1, keepdims=True)
     cosine = z @ z.T
     probability = 1.0 / (1.0 + np.exp(-(scale * cosine + offset)))
+    kind = np.where(cosine > 0.5, "near", np.where(cosine > 0.0, "mid", "far"))
+    block = (z[:, 0] > 0).astype(np.int64) * 2 + (z[:, 1] > 0)
+    return _sample(probability, block, kind, rng)
+
+
+def latent_kernel_graph(
+    num_nodes: int = 500,
+    intrinsic_dim: int = 4,
+    scale: float = 5.0,
+    mean_degree: float = 18.0,
+    *,
+    seed: int = 0,
+) -> BlockGraph:
+    """Nodes uniform on a sphere with ``P_ij = c * exp(scale * cos)``.
+
+    With 1:1 negative sampling the classifier target is ``P / (P + rho)``, which for
+    this kernel is exactly ``sigmoid(scale * cos - ln M)`` (``M`` the mean of
+    ``exp(scale * cos)``): a shared temperature plus one bias represents it, up to rare
+    clipping at 1.
+    Fit it with ``GraphVAEConfig(decoder_bias=True)``.
+
+    Args:
+        num_nodes: Number of nodes.
+        intrinsic_dim: Ambient dimension of the latent sphere.
+        scale: The kernel's inverse temperature (the temperature a model should learn).
+        mean_degree: Expected degree before clipping (sets ``c``).
+        seed: Seed for the positions and the edges.
+
+    Returns:
+        The graph; ``block`` and ``kind`` are as in :func:`latent_sphere_graph`.
+    """
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal((num_nodes, intrinsic_dim))
+    z /= np.linalg.norm(z, axis=1, keepdims=True)
+    cosine = z @ z.T
+    kernel = np.exp(scale * cosine)
+    off_diagonal = ~np.eye(num_nodes, dtype=bool)
+    constant = mean_degree / ((num_nodes - 1) * kernel[off_diagonal].mean())
+    probability = np.clip(constant * kernel, 0.0, 1.0)
     kind = np.where(cosine > 0.5, "near", np.where(cosine > 0.0, "mid", "far"))
     block = (z[:, 0] > 0).astype(np.int64) * 2 + (z[:, 1] > 0)
     return _sample(probability, block, kind, rng)
