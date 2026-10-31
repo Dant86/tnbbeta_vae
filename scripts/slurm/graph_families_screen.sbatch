@@ -3,15 +3,16 @@
 # probabilities (apps/synthetic/graph_families.py). Does a structure exist where TNBBeta's
 # expressivity matters and vMF / power-spherical / Gaussian fail?
 #
-# Graph presets (4): assortative, assortative_dc (degree-corrected), bipartite (extreme
-# disassortative), core_periphery. Conditions (7), every one with matched ambient dimension 16
+# Graph presets (8): assortative, assortative_dc (degree-corrected), bipartite (extreme
+# disassortative), core_periphery, latent_sphere, mixed_membership, scale_free, ring. Conditions (7), every one with matched ambient dimension 16
 # (Gaussian 15) and the SAME budget (500 epochs) -- the controls the fixed-kappa work showed
 # are required, since free kappa is slow to learn:
 #   tnbbeta_free, tnbbeta_f0.5 (epsilon fixed at m = 0.5 * (d-1)/2, unimodal),
 #   vmf_free, vmf_k1 (kappa = d), power_spherical_free, power_spherical_k1, gaussian.
-# Each cell is one (preset, condition) over seeds 0-4: 28 cells, 4 per task -> array 0-6.
+# Each cell is one (preset, condition) over seeds 0-4: 56 cells, 4 per task -> array 0-13.
 # Results: $TNBBETA_CHECKPOINT_DIR/synthetic_graphs/gf_<preset>_<condition>.json. Safe to
 # resubmit: finished cells are skipped. No --device flag (bad GPU node -> exit 75, resubmit).
+# GF_PREFIX (default gf) renames the result files, e.g. to rerun with posterior logging.
 #SBATCH --job-name=graph-families
 #SBATCH --partition=general
 #SBATCH --gres=gpu:1
@@ -19,7 +20,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=02:00:00
 #SBATCH --requeue
-#SBATCH --array=0-6
+#SBATCH --array=0-13
 #SBATCH --output=slurm_logs/%x_%A_%a.out
 #SBATCH --error=slurm_logs/%x_%A_%a.err
 
@@ -29,9 +30,10 @@ source "${SLURM_SUBMIT_DIR}/scripts/slurm/no_gpu_retry.sh"
 
 CKPT_DIR="$(uv run --no-sync python -c 'from tnbbeta_vae.paths import checkpoint_dir; print(checkpoint_dir())')"
 
-PRESETS=(assortative assortative_dc bipartite core_periphery)
+PRESETS=(assortative assortative_dc bipartite core_periphery latent_sphere mixed_membership scale_free ring)
 CONDITIONS=(tnbbeta_free tnbbeta_f0.5 vmf_free vmf_k1 power_spherical_free power_spherical_k1 gaussian)
 DIM=16
+PREFIX="${GF_PREFIX:-gf}"
 CELLS_PER_TASK=4
 NUM_CELLS=$(( ${#PRESETS[@]} * ${#CONDITIONS[@]} ))
 
@@ -39,7 +41,7 @@ run_cell() {
     local i="$1"
     local condition="${CONDITIONS[$((i % ${#CONDITIONS[@]}))]}"
     local preset="${PRESETS[$((i / ${#CONDITIONS[@]}))]}"
-    local name="gf_${preset}_${condition}"
+    local name="${PREFIX}_${preset}_${condition}"
     local flags=() latent_dim="${DIM}" family
     case "${condition}" in
         tnbbeta_free) family=tnbbeta ;;

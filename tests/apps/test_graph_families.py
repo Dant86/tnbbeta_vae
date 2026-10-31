@@ -48,3 +48,6 @@ def test_train_and_evaluate_reports_finite_metrics_for_centres_and_samples(
             assert math.isfinite(result[f"{name}_{metric}"])
         assert set(result[f"{name}_truth_kl_by_kind"]) == {"within", "between"}
     assert result["test_auc"] == result["centre_test_auc"]
+    assert set(result["posterior_by_block"]) == {"0", "1", "2"}
+    assert 0.0 < result["posterior"]["r_bar"] <= 1.0
+    assert ("frac_bimodal" in result["posterior"]) == (family == "tnbbeta")

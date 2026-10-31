@@ -48,10 +48,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--graph", nargs="+", default=sorted(PRESETS))
     parser.add_argument("--root", type=Path, default=None)
+    parser.add_argument("--prefix", default="gf")
     args = parser.parse_args(argv)
     directory = (args.root or checkpoint_dir()) / "synthetic_graphs"
     for graph in args.graph:
-        conditions = collect(directory, graph)
+        conditions = collect(directory, graph, args.prefix)
         if not conditions:
             continue
         print(f"\n### {graph}\n")
@@ -60,11 +61,11 @@ def main(argv: list[str] | None = None) -> None:
         print(kind_table(conditions))
 
 
-def collect(directory: Path, graph: str) -> dict[str, list[dict]]:
+def collect(directory: Path, graph: str, prefix: str = "gf") -> dict[str, list[dict]]:
     """Returns each condition's per-seed result dicts for ``graph``."""
     found = {}
     for condition in CONDITIONS:
-        path = directory / f"gf_{graph}_{condition}.json"
+        path = directory / f"{prefix}_{graph}_{condition}.json"
         if path.exists():
             found[condition] = json.loads(path.read_text())["runs"]
     return found

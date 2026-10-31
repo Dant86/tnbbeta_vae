@@ -47,9 +47,16 @@ from tnbbeta_vae.data.planetoid import (
     normalized_adjacency,
     split_edges,
 )
+from tnbbeta_vae.data.structured_graph import (
+    latent_sphere_graph,
+    mixed_membership_graph,
+    ring_graph,
+    scale_free_graph,
+)
 from tnbbeta_vae.models import GraphBatch, GraphVAE, GraphVAEConfig
 from tnbbeta_vae.models.heads import epsilon_from_m
 from tnbbeta_vae.models.losses.ranking import roc_auc
+from tnbbeta_vae.models.posterior_stats import posterior_stats
 from tnbbeta_vae.models.predictive import (
     balanced_truth,
     bernoulli_kl,
@@ -67,6 +74,10 @@ PRESETS: dict[str, Callable[[int], BlockGraph]] = {
     ),
     "bipartite": lambda seed: block_graph(bipartite_spec(), seed=seed),
     "core_periphery": lambda seed: block_graph(core_periphery_spec(), seed=seed),
+    "latent_sphere": lambda seed: latent_sphere_graph(seed=seed),
+    "mixed_membership": lambda seed: mixed_membership_graph(seed=seed),
+    "scale_free": lambda seed: scale_free_graph(seed=seed),
+    "ring": lambda seed: ring_graph(seed=seed),
 }
 
 
@@ -195,7 +206,10 @@ def evaluate_graph_model(
         ``test_auc`` (centres), ``oracle_test_auc`` (the true probabilities, an upper
         reference), ``test_log_loss`` / ``test_ece`` and ``truth_kl`` for each of
         ``centre`` and ``sampled`` predictions, and ``truth_kl_by_kind`` (the same KL
-        per pair kind, over non-training pairs).
+        per pair kind, over non-training pairs), and ``posterior`` /
+        ``posterior_by_block`` (``posterior_stats`` over every node and over each
+        block: ``r_bar`` and, for TNBBeta, ``p`` / ``q`` / ``epsilon`` / ``m`` and
+        ``frac_bimodal``).
     """
     device = next(model.parameters()).device
     batch = GraphBatch(
@@ -246,6 +260,17 @@ def evaluate_graph_model(
             if (held & (sample.kind == kind)).any()
         }
     result["test_auc"] = result["centre_test_auc"]
+    with torch.no_grad():
+        posterior, _ = model.posterior_and_prior(batch)
+        config = model.config.model_dump()
+        everyone = torch.ones(sample.block.shape[0], dtype=torch.bool, device=device)
+        result["posterior"] = posterior_stats(posterior, everyone, config)
+        result["posterior_by_block"] = {
+            str(b): posterior_stats(
+                posterior, torch.as_tensor(sample.block == b, device=device), config
+            )
+            for b in np.unique(sample.block)
+        }
     return result
 
 
