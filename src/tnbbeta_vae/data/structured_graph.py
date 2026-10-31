@@ -6,7 +6,8 @@ Every generator returns the same :class:`~tnbbeta_vae.data.block_graph.BlockGrap
 names each pair's type), so ``apps.synthetic.graph_families`` scores them unchanged.
 
 * :func:`latent_sphere_graph`: nodes on a sphere, ``P = sigmoid(scale * cos + offset)``,
-  the generative model a dot-product decoder on a sphere assumes.
+  close to what a dot-product decoder on a sphere models, but the decoder has no bias
+  term, so the negative ``offset`` is not exactly representable.
 * :func:`mixed_membership_graph`: overlapping communities (each node a Dirichlet
   mixture).
 * :func:`scale_free_graph`: a Chung-Lu model with Pareto weights; heavy-tailed degrees

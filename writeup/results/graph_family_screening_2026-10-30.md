@@ -230,3 +230,181 @@ Sampled KL to the true pair probabilities, by pair kind
 | power_spherical_free | 0.204 | 0.259 | 0.217 | 0.210 | 0.226 | 0.414 |
 | power_spherical_k1 | 0.197 | 0.244 | 0.207 | 0.175 | 0.216 | 0.494 |
 | gaussian | 0.157 | 0.014 | 0.183 | 0.051 | 0.208 | 0.581 |
+
+
+## Update (2026-10-31): posterior shape logged, and four graphs that are not block models
+
+- **Code:** `a66f095` on `synthetic-graph-families` (PR #69). Logging adds `posterior` and
+  `posterior_by_block` (`posterior_stats`: `r_bar`, and for TNBBeta `p`/`q`/`epsilon`/`m`/
+  `frac_bimodal`) to every cell. New generators are in `tnbbeta_vae/data/structured_graph.py`.
+- **Commands** (`GF_PREFIX` keeps these separate from the `gf_*` files above):
+
+  ```bash
+  GF_PREFIX=gfp sbatch scripts/slurm/graph_families_screen.sbatch                # job 2282624: the original 4 presets, rerun with logging
+  GF_PREFIX=gfp sbatch --array=7-13 scripts/slurm/graph_families_screen.sbatch   # job 2282637: latent_sphere, mixed_membership, scale_free, ring
+  uv run python -m apps.eval.graph_families_table --prefix gfp --graph latent_sphere mixed_membership scale_free ring
+  ```
+
+### Free TNBBeta is bimodal everywhere (`m < 0`, `frac_bimodal` = 1.0)
+
+| graph | `m` | `r_bar` |
+|---|---|---|
+| assortative | -4.41 | 0.90 |
+| assortative_dc | -4.36 | 0.89 |
+| bipartite | -5.74 | 0.10 |
+| core_periphery | -4.45 | 0.86 |
+| latent_sphere | -4.32 | 0.93 |
+| mixed_membership | -5.90 | 0.43 |
+| scale_free | -5.88 | 0.33 |
+| ring | -4.45 | 0.94 |
+
+- `m < 0` holds on every graph, including ones the model cannot learn (bipartite, and
+  mixed_membership at near-chance AUC), so it is the default landing point of free training
+  here, not a response to structure. `m < 0` says the *density* has an antipodal mode; it does
+  not say the samples split across the sphere (`r_bar` is about 0.9 on four graphs). The mass in
+  the second mode was not measured.
+- Within a graph `m` tracks degree: core_periphery cores have `m` about -2.6, peripheries about
+  -4.9; scale_free `m` is -6.1 for the lowest weight quartile and -5.5 for the highest.
+- Reproduction: the `gfp` rerun of the original presets differs from `gf` by at most 0.0083 in
+  centre AUC or sampled KL (GPU nondeterminism).
+
+#### latent_sphere
+
+Oracle (true-probability) test AUC: 0.962
+
+| condition | seeds | centre AUC | sampled AUC | centre logloss | sampled logloss | sampled ECE | centre KL | sampled KL |
+|---|---|---|---|---|---|---|---|---|
+| tnbbeta_free | 5 | 0.947 ± 0.010 | 0.946 ± 0.010 | 0.448 | 0.457 | 0.185 | 0.400 | 0.409 |
+| tnbbeta_f0.5 | 5 | 0.945 ± 0.011 | 0.943 ± 0.010 | 0.472 | 0.481 | 0.201 | 0.436 | 0.434 |
+| vmf_free | 5 | 0.948 ± 0.009 | 0.948 ± 0.009 | 0.480 | 0.483 | 0.213 | 0.449 | 0.439 |
+| vmf_k1 | 5 | 0.946 ± 0.011 | 0.935 ± 0.012 | 0.486 | 0.534 | 0.233 | 0.458 | 0.457 |
+| power_spherical_free | 5 | 0.949 ± 0.010 | 0.946 ± 0.009 | 0.482 | 0.487 | 0.210 | 0.453 | 0.440 |
+| power_spherical_k1 | 5 | 0.945 ± 0.012 | 0.924 ± 0.015 | 0.484 | 0.579 | 0.272 | 0.456 | 0.476 |
+| gaussian | 5 | 0.940 ± 0.010 | 0.939 ± 0.010 | 0.481 | 0.482 | 0.193 | 0.437 | 0.438 |
+
+Sampled KL to the true pair probabilities, by pair kind
+
+| condition | far | mid | near |
+|---|---|---|---|
+| tnbbeta_free | 0.460 | 0.510 | 0.070 |
+| tnbbeta_f0.5 | 0.420 | 0.651 | 0.080 |
+| vmf_free | 0.411 | 0.677 | 0.082 |
+| vmf_k1 | 0.511 | 0.577 | 0.069 |
+| power_spherical_free | 0.418 | 0.672 | 0.080 |
+| power_spherical_k1 | 0.565 | 0.542 | 0.084 |
+| gaussian | 0.398 | 0.691 | 0.092 |
+
+#### mixed_membership
+
+Oracle (true-probability) test AUC: 0.655
+
+| condition | seeds | centre AUC | sampled AUC | centre logloss | sampled logloss | sampled ECE | centre KL | sampled KL |
+|---|---|---|---|---|---|---|---|---|
+| tnbbeta_free | 5 | 0.514 ± 0.015 | 0.512 ± 0.014 | 0.812 | 0.700 | 0.052 | 0.162 | 0.048 |
+| tnbbeta_f0.5 | 5 | 0.512 ± 0.014 | 0.517 ± 0.013 | 0.937 | 0.732 | 0.092 | 0.294 | 0.077 |
+| vmf_free | 5 | 0.518 ± 0.009 | 0.515 ± 0.012 | 0.986 | 0.701 | 0.046 | 0.367 | 0.049 |
+| vmf_k1 | 5 | 0.533 ± 0.017 | 0.529 ± 0.015 | 0.797 | 0.702 | 0.045 | 0.149 | 0.052 |
+| power_spherical_free | 5 | 0.509 ± 0.005 | 0.508 ± 0.013 | 0.754 | 0.694 | 0.021 | 0.111 | 0.042 |
+| power_spherical_k1 | 5 | 0.532 ± 0.022 | 0.536 ± 0.020 | 0.810 | 0.696 | 0.033 | 0.160 | 0.047 |
+| gaussian | 5 | 0.513 ± 0.013 | 0.513 ± 0.025 | 0.693 | 0.693 | 0.017 | 0.043 | 0.043 |
+
+Sampled KL to the true pair probabilities, by pair kind
+
+| condition | mixed | pure-diff | pure-same |
+|---|---|---|---|
+| tnbbeta_free | 0.039 | 0.068 | 0.087 |
+| tnbbeta_f0.5 | 0.070 | 0.093 | 0.100 |
+| vmf_free | 0.040 | 0.069 | 0.081 |
+| vmf_k1 | 0.043 | 0.074 | 0.073 |
+| power_spherical_free | 0.032 | 0.063 | 0.084 |
+| power_spherical_k1 | 0.038 | 0.069 | 0.073 |
+| gaussian | 0.033 | 0.066 | 0.086 |
+
+#### scale_free
+
+Oracle (true-probability) test AUC: 0.707
+
+| condition | seeds | centre AUC | sampled AUC | centre logloss | sampled logloss | sampled ECE | centre KL | sampled KL |
+|---|---|---|---|---|---|---|---|---|
+| tnbbeta_free | 5 | 0.611 ± 0.024 | 0.637 ± 0.032 | 0.753 | 0.683 | 0.035 | 0.169 | 0.054 |
+| tnbbeta_f0.5 | 5 | 0.590 ± 0.029 | 0.539 ± 0.037 | 1.405 | 0.695 | 0.043 | 0.900 | 0.061 |
+| vmf_free | 5 | 0.598 ± 0.033 | 0.532 ± 0.034 | 1.300 | 0.692 | 0.034 | 0.809 | 0.057 |
+| vmf_k1 | 5 | 0.591 ± 0.035 | 0.558 ± 0.021 | 1.730 | 0.830 | 0.224 | 1.304 | 0.261 |
+| power_spherical_free | 5 | 0.599 ± 0.006 | 0.575 ± 0.056 | 1.276 | 0.689 | 0.027 | 0.776 | 0.055 |
+| power_spherical_k1 | 5 | 0.590 ± 0.012 | 0.559 ± 0.026 | 1.508 | 0.743 | 0.146 | 1.034 | 0.143 |
+| gaussian | 5 | 0.696 ± 0.013 | 0.647 ± 0.062 | 0.679 | 0.681 | 0.097 | 0.064 | 0.064 |
+
+Sampled KL to the true pair probabilities, by pair kind
+
+| condition | hub-hub | hub-leaf | leaf-leaf |
+|---|---|---|---|
+| tnbbeta_free | 0.174 | 0.042 | 0.055 |
+| tnbbeta_f0.5 | 0.207 | 0.056 | 0.060 |
+| vmf_free | 0.212 | 0.054 | 0.056 |
+| vmf_k1 | 0.039 | 0.071 | 0.303 |
+| power_spherical_free | 0.210 | 0.051 | 0.055 |
+| power_spherical_k1 | 0.075 | 0.037 | 0.166 |
+| gaussian | 0.124 | 0.028 | 0.071 |
+
+#### ring
+
+Oracle (true-probability) test AUC: 0.850
+
+| condition | seeds | centre AUC | sampled AUC | centre logloss | sampled logloss | sampled ECE | centre KL | sampled KL |
+|---|---|---|---|---|---|---|---|---|
+| tnbbeta_free | 5 | 0.840 ± 0.006 | 0.840 ± 0.005 | 0.525 | 0.525 | 0.162 | 0.186 | 0.175 |
+| tnbbeta_f0.5 | 5 | 0.836 ± 0.004 | 0.835 ± 0.004 | 0.538 | 0.535 | 0.160 | 0.200 | 0.184 |
+| vmf_free | 5 | 0.839 ± 0.005 | 0.838 ± 0.005 | 0.544 | 0.544 | 0.182 | 0.212 | 0.180 |
+| vmf_k1 | 5 | 0.835 ± 0.009 | 0.824 ± 0.010 | 0.650 | 0.593 | 0.205 | 0.390 | 0.195 |
+| power_spherical_free | 5 | 0.836 ± 0.004 | 0.772 ± 0.124 | 0.625 | 0.591 | 0.157 | 0.333 | 0.174 |
+| power_spherical_k1 | 5 | 0.833 ± 0.009 | 0.824 ± 0.012 | 0.598 | 0.607 | 0.229 | 0.284 | 0.162 |
+| gaussian | 5 | 0.823 ± 0.006 | 0.823 ± 0.006 | 0.562 | 0.562 | 0.143 | 0.212 | 0.209 |
+
+Sampled KL to the true pair probabilities, by pair kind
+
+| condition | lattice | shortcut |
+|---|---|---|
+| tnbbeta_free | 0.033 | 0.178 |
+| tnbbeta_f0.5 | 0.033 | 0.187 |
+| vmf_free | 0.066 | 0.182 |
+| vmf_k1 | 0.160 | 0.196 |
+| power_spherical_free | 0.197 | 0.174 |
+| power_spherical_k1 | 0.249 | 0.161 |
+| gaussian | 0.065 | 0.212 |
+
+### Reading
+
+- **latent_sphere** (oracle AUC 0.962): centre AUC is 0.940-0.949 for every family. On sampled
+  KL, free TNBBeta is lowest (0.409 against 0.434-0.476) and better than every other condition
+  in **5/5 paired seeds**, by 0.025-0.031, including TNBBeta with `m` pinned unimodal
+  (`f0.5`). This is the first graph where the free (bimodal) TNBBeta beats the unimodal one in
+  every seed. It is a 7% KL gap, `f0.5` is a single `m` value, and free versus fixed also
+  differs in `epsilon` per node, so it does not isolate bimodality. **Caveat on the design:**
+  the decoder has no bias term, so the generator's `sigmoid(10 cos - 9)` is not exactly
+  representable (every family's KL is about 0.4 and ECE about 0.19). The preset is not "the
+  decoder's own generative model" as its docstring implies; an offset-free generator would be
+  needed for that claim.
+- **scale_free** (oracle 0.707): the Gaussian is clearly best on centre AUC (0.696 against
+  0.590-0.611 for every sphere family, 0/5 seeds for TNBBeta), as expected, since a bounded
+  norm with one shared temperature cannot express node-specific degree. Free TNBBeta is the best
+  sphere family (centre 0.611, sampled 0.637), ahead of `f0.5` and free vMF/PS in 4/5 seeds.
+- **ring** (oracle 0.850): sampled KL is 0.174-0.209 for all but the Gaussian (worst, 0.209;
+  TNBBeta better in 5/5 seeds). Free TNBBeta's lattice-pair KL is 0.033 against 0.065-0.249,
+  but `f0.5` gets the same 0.033, so it is not bimodality. Free PS sampled AUC collapses in
+  some seeds (0.772 +- 0.124).
+- **mixed_membership** (oracle 0.655): no family learns it (centre AUC 0.51-0.53), and the
+  Gaussian's KL (0.043) is the lowest only because it predicts the base rate. This graph is
+  uninformative at this size and density; it does not show a difference between families.
+
+**Standing conclusion.** Across eight graph families there is still no graph on which TNBBeta
+is required: the sphere families tie on centre AUC except where an unbounded norm matters
+(core_periphery, scale_free, both won by the Gaussian). The one signal that favours free
+(bimodal) over unimodal TNBBeta is latent_sphere sampled KL, and it needs the confounds above
+removed before it can be attributed to bimodality.
+
+### Suggested next steps
+
+1. Re-specify latent_sphere without an unrepresentable offset, and compare free TNBBeta against
+   `m` pinned at several values (negative and positive), not just `f0.5`.
+2. Measure the second mode's mass for free TNBBeta (`r_bar` cancels for antipodal mixtures).
+3. A larger, denser mixed_membership graph so the model can learn it at all.
