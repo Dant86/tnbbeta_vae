@@ -139,4 +139,12 @@ core-periphery draw), and the Gaussian had the lowest mean log loss in most fami
 
 ## Deviations
 
-(none yet)
+- **2026-11-01, after discovery:** `graph_search_stats.py` gained `confirmation_report`
+  (`test --stage confirmation`), which restricts the confirmation tests to the discovery-rejected
+  (config, metric) pairs and applies Holm over just those. This implements the confirmation rule
+  stated above, which the analysis code had not yet encoded; the discovery analysis (`render_report`,
+  `run_config_tests`, margins, BH, Holm) is unchanged. The code change is in the commit that adds
+  this entry.
+- **2026-11-01, not pre-registered (exploratory):** a sensitivity analysis that removes every draw
+  on which TNBBeta diverged (146 TNBBeta runs diverged in discovery; no vMF, PS or Gaussian run did),
+  reported separately from the pre-registered results.

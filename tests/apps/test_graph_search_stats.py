@@ -12,6 +12,7 @@ from apps.eval.graph_search_stats import (
     one_sided_p,
     paired_differences,
     pooled_family_tests,
+    rejected_pairs,
     required_draws,
     run_config_tests,
 )
@@ -121,3 +122,13 @@ def test_pooled_family_test_pools_configs_and_required_draws_scales_with_varianc
 
     assert loss["configs"] == 8 and loss["p"] < 0.01
     assert required_draws(0.02, 0.01, 1e-3) > required_draws(0.01, 0.01, 1e-3)
+
+
+def test_rejected_pairs_selects_the_bh_significant_ones_in_order() -> None:
+    rows = [
+        {"config_id": "b-01", "metric": "m1", "q_bh": 0.01},
+        {"config_id": "a-00", "metric": "m2", "q_bh": 0.2},
+        {"config_id": "a-00", "metric": "m1", "q_bh": 0.05},
+    ]
+
+    assert rejected_pairs(rows, 0.05) == [("a-00", "m1"), ("b-01", "m1")]

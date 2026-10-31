@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> None:
         print(json.dumps(tune_learning_rates(load_runs("pilot")), indent=2))
     elif args.command == "variance":
         print(variance_report(load_runs("pilot")))
+    elif args.stage == "confirmation":
+        print(confirmation_report(args.alpha))
     else:
         print(render_report(args.stage, args.set, args.alpha))
 
@@ -347,6 +349,52 @@ def render_report(stage: str, comparator_set: str, alpha: float) -> str:
         out.append(
             f"| {r['family']} | {r['metric']} | {r['configs']} | {r['p']:.2e} | "
             f"{r['p_holm']:.2e} | {diffs} |"
+        )
+    return "\n".join(out)
+
+
+def rejected_pairs(rows: list[dict[str, Any]], alpha: float) -> list[tuple[str, str]]:
+    """Returns the (config, metric) pairs with discovery BH q-value at most alpha."""
+    return sorted((r["config_id"], r["metric"]) for r in rows if r["q_bh"] <= alpha)
+
+
+def confirmation_report(alpha: float) -> str:
+    """Tests exactly the discovery-rejected (config, metric) pairs on fresh draws.
+
+    The pairs come from ``discovery/test_rows.json`` (primary comparator set, BH
+    q <= alpha); the confirmation p-values are Holm-corrected over just those pairs. A
+    pair is *confirmed* when its Holm p-value is at most alpha. Also reports each pair's
+    mean difference in discovery and in confirmation, to show shrinkage.
+    """
+    discovery = json.loads((stage_dir("discovery") / "test_rows.json").read_text())
+    primary = discovery["primary"]
+    wanted = set(rejected_pairs(primary, alpha))
+    first = {(r["config_id"], r["metric"]): r for r in primary}
+    rows = [
+        r
+        for r in run_config_tests(load_runs("confirmation"), COMPARATOR_SETS["primary"])
+        if (r["config_id"], r["metric"]) in wanted
+    ]
+    if not rows:
+        return "No complete confirmation pairs yet."
+    for row, value in zip(rows, holm([r["p"] for r in rows]), strict=True):
+        row["p_holm"] = value
+    confirmed = [r for r in rows if r["p_holm"] <= alpha]
+    out = [
+        f"## confirmation of {len(wanted)} discovery-rejected pairs "
+        f"(Holm, alpha = {alpha})",
+        f"- pairs tested: {len(rows)} of {len(wanted)}; confirmed: {len(confirmed)}",
+        "",
+        "| config | metric | confirmed | p (Holm) | mean diff: discovery -> confirm |",
+        "|---|---|---|---|---|",
+    ]
+    for r in sorted(rows, key=lambda r: r["p_holm"]):
+        before = first[(r["config_id"], r["metric"])]["mean_diff"]
+        after = r["mean_diff"]
+        shown = "; ".join(f"{c}: {before[c]:+.4f} -> {after[c]:+.4f}" for c in after)
+        out.append(
+            f"| {r['config_id']} | {r['metric']} | "
+            f"{'yes' if r['p_holm'] <= alpha else 'no'} | {r['p_holm']:.2e} | {shown} |"
         )
     return "\n".join(out)
 
