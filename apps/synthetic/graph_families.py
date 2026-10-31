@@ -271,7 +271,7 @@ def evaluate_graph_model(
         config = model.config.model_dump()
         everyone = torch.ones(sample.block.shape[0], dtype=torch.bool, device=device)
         result["posterior"] = posterior_stats(posterior, everyone, config)
-        result["posterior"].update(_second_mode_mass(posterior, num_samples))
+        result["posterior"].update(second_mode_mass(posterior, num_samples))
         result["posterior_by_block"] = {
             str(b): posterior_stats(
                 posterior, torch.as_tensor(sample.block == b, device=device), config
@@ -281,7 +281,7 @@ def evaluate_graph_model(
     return result
 
 
-def _second_mode_mass(posterior: Any, num_samples: int) -> dict[str, float]:
+def second_mode_mass(posterior: Any, num_samples: int) -> dict[str, float]:
     """Mass a posterior puts in its lesser hemisphere about its axis (nan: Gaussian).
 
     ``r_bar`` cancels for antipodal mixtures, so it cannot show how much of a bimodal

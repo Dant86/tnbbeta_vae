@@ -537,3 +537,39 @@ def test_decoder_bias_shifts_every_link_logit() -> None:
         model.bias.fill_(-2.0)
 
     assert torch.allclose(model.link_logits(z, edges), before - 2.0)
+
+
+@pytest.mark.parametrize("family", ["vmf", "power_spherical"])
+def test_initial_kappa_starts_kappa_near_the_target_and_leaves_it_trainable(
+    family: str,
+) -> None:
+    torch.manual_seed(0)
+    config = GraphVAEConfig(
+        family=family,  # type: ignore[arg-type]
+        in_features=20,
+        latent_dim=16,
+        initial_kappa=16.0,
+    )
+    model = GraphVAE(config)
+    batch = GraphBatch(
+        features=torch.eye(20),
+        norm_adjacency=torch.eye(20).to_sparse(),
+        positive_edges=torch.tensor([[0, 1], [1, 2]]),
+    )
+    posterior, _ = model.posterior_and_prior(batch)
+
+    kappa = posterior.scale if family == "vmf" else posterior.kappa  # type: ignore[attr-defined]
+    assert 10.0 < float(kappa.mean()) < 22.0
+    assert model.second.weight.requires_grad
+    assert head_size(family, 16) == model.second.out_features  # type: ignore[arg-type]
+
+
+def test_initial_kappa_rejects_other_families_and_fixed_kappa() -> None:
+    with pytest.raises(ValueError, match="initial_kappa"):
+        GraphVAE(GraphVAEConfig(family="tnbbeta", in_features=5, initial_kappa=4.0))
+    with pytest.raises(ValueError, match="exclusive"):
+        GraphVAE(
+            GraphVAEConfig(
+                family="vmf", in_features=5, initial_kappa=4.0, fixed_kappa=4.0
+            )
+        )

@@ -25,8 +25,10 @@ from tnbbeta_vae.models.heads import (
     head_size,
     posterior_centre,
     posterior_from_raw,
+    power_spherical_kappa_inverse,
     standard_prior,
     tnbbeta_posterior,
+    vmf_kappa_inverse,
 )
 from tnbbeta_vae.models.pairwise import pairwise_logits
 from tnbbeta_vae.registry import register_model
@@ -102,6 +104,10 @@ class GraphVAEConfig(BaseModel):
             one (the head then predicts one fewer output). ``None`` (default) leaves
             kappa learned and the head's shape unchanged, so existing checkpoints
             still load.
+        initial_kappa: For ``family="vmf"`` or ``"power_spherical"`` with learned kappa:
+            shifts the kappa logit so every node's kappa *starts* near this value, then
+            trains it as usual. ``None`` (default) leaves the head unchanged. The head's
+            raw output is random, so the start is approximate.
         decoder_bias: If ``True``, adds one learned scalar to every pair's logit (all
             families). Off by default, and the parameter exists only when on, so
             existing checkpoints still load. Needed when the true edge probability
@@ -118,6 +124,7 @@ class GraphVAEConfig(BaseModel):
     feature_reconstruction_weight: float = 0.0
     fixed_epsilon: float | None = None
     fixed_kappa: float | None = None
+    initial_kappa: float | None = None
     decoder_bias: bool = False
 
 
@@ -137,6 +144,14 @@ class GraphVAE(nn.Module):
         posterior_head_size = head_size(config.family, config.latent_dim)
         if config.family == "tnbbeta" and config.fixed_epsilon is not None:
             posterior_head_size -= 1
+        if config.initial_kappa is not None:
+            if config.family not in ("vmf", "power_spherical"):
+                raise ValueError(
+                    f"initial_kappa needs family 'vmf' or 'power_spherical'; "
+                    f"got {config.family!r}."
+                )
+            if config.fixed_kappa is not None:
+                raise ValueError("initial_kappa and fixed_kappa are exclusive.")
         if config.fixed_kappa is not None:
             if config.family not in ("vmf", "power_spherical"):
                 raise ValueError(
@@ -285,6 +300,15 @@ class GraphVAE(nn.Module):
             return fixed_kappa_posterior(
                 self.config.family, raw, self.config.fixed_kappa
             )
+        if self.config.initial_kappa is not None:
+            inverse = (
+                vmf_kappa_inverse
+                if self.config.family == "vmf"
+                else power_spherical_kappa_inverse
+            )
+            shift = torch.zeros_like(raw)
+            shift[..., -1] = inverse(self.config.initial_kappa)
+            raw = raw + shift
         return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
 
     def _prior(self, raw: Tensor) -> Distribution:

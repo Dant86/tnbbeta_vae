@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 
@@ -66,3 +67,30 @@ def test_dense_probabilities_are_valid_for_centres_and_samples(family: str) -> N
         assert probability.shape == (n, n)
         assert torch.allclose(probability, probability.T, atol=1e-5)
         assert ((probability >= 0) & (probability <= 1)).all()
+
+
+def test_calibration_slope_recovers_a_known_miscalibration() -> None:
+    from tnbbeta_vae.models.predictive import calibration_slope
+
+    generator = torch.Generator().manual_seed(0)
+    logit = torch.randn(20_000, generator=generator) * 2.0
+    target = (torch.rand(20_000, generator=generator) < torch.sigmoid(logit)).float()
+
+    calibrated, _ = calibration_slope(torch.sigmoid(logit), target)
+    overconfident, _ = calibration_slope(torch.sigmoid(2.0 * logit), target)
+
+    assert abs(calibrated - 1.0) < 0.08
+    assert abs(overconfident - 0.5) < 0.06
+
+
+def test_uncertainty_error_auroc_detects_informative_spread() -> None:
+    from tnbbeta_vae.models.predictive import uncertainty_error_auroc
+
+    target = torch.tensor([1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+    mean = torch.tensor([0.9, 0.2, 0.1, 0.8, 0.7, 0.3])  # items 1 and 3 are wrong
+    informative = torch.tensor([0.01, 0.4, 0.02, 0.5, 0.03, 0.01])
+    flat = torch.full((6,), 0.1)
+
+    assert uncertainty_error_auroc(mean, informative, target) == 1.0
+    assert uncertainty_error_auroc(mean, flat, target) == 0.5
+    assert np.isnan(uncertainty_error_auroc(target, informative, target))
