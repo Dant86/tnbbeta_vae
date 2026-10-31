@@ -400,7 +400,8 @@ Sampled KL to the true pair probabilities, by pair kind
 is required: the sphere families tie on centre AUC except where an unbounded norm matters
 (core_periphery, scale_free, both won by the Gaussian). The one signal that favours free
 (bimodal) over unimodal TNBBeta is latent_sphere sampled KL, and it needs the confounds above
-removed before it can be attributed to bimodality.
+removed before it can be attributed to bimodality. **Superseded by the next section**: with the
+confounds removed the lead disappears.
 
 ### Suggested next steps
 
@@ -408,3 +409,138 @@ removed before it can be attributed to bimodality.
    `m` pinned at several values (negative and positive), not just `f0.5`.
 2. Measure the second mode's mass for free TNBBeta (`r_bar` cancels for antipodal mixtures).
 3. A larger, denser mixed_membership graph so the model can learn it at all.
+
+
+## Update (2026-10-31, later): an exactly representable graph, an `m` sweep, and second-mode mass
+
+- **Code:** `ca923c4` on `synthetic-graph-families` (PR #69). New: `GraphVAEConfig.decoder_bias`
+  (default off, parameter exists only when on), `latent_kernel_graph`, `--decoder-bias`, and
+  `second_mode_mass` logging.
+- **Graph:** `latent_kernel`, `P_ij = c exp(5 cos)` on S^3 with 500 nodes and mean degree 18. With
+  1:1 negative sampling the target `P / (P + rho)` is exactly `sigmoid(5 cos - ln M)`, which a
+  shared temperature plus one bias represents (no pair is clipped). This removes the confound
+  that the earlier `latent_sphere` offset was not representable without a bias.
+- **Commands** (5 seeds, ambient dimension 16, Gaussian 15, 500 epochs; every cell has the bias):
+
+  ```bash
+  sbatch scripts/slurm/latent_kernel_m_sweep.sbatch                 # job 2282674 (first run, files lk_*; its second-mode metric was wrong, see below)
+  LK_PREFIX=lk2 sbatch scripts/slurm/latent_kernel_m_sweep.sbatch   # job 2282690 (files lk2_*, the results below)
+  uv run python -m apps.eval.graph_families_table --prefix lk2 --graph latent_kernel \
+      --conditions tnbbeta_free tnbbeta_m-6 tnbbeta_m-4 tnbbeta_m-2 tnbbeta_m-0.5 tnbbeta_m1 \
+      tnbbeta_m3.75 tnbbeta_m7.5 vmf_free vmf_k1 power_spherical_free power_spherical_k1 gaussian
+  ```
+
+  The two runs agree exactly on every KL (difference 0.0).
+- **Metric correction.** `second_mode_mass` is, per node, `min(s, 1 - s)` where `s` is the share
+  of posterior samples with a negative inner product with the node's mean direction, averaged
+  over nodes (`frac_nodes_second_mode`: nodes above 10%). The first run reported `s` itself, which
+  read 1.0 in one seed where `p` was 0.02: that is all mass at the antipode, a unimodal cap
+  pointing the other way (`(mu, p)` and `(-mu, 1 - p)` are the same distribution), not a second
+  mode.
+
+#### latent_kernel (decoder bias on)
+
+Oracle (true-probability) test AUC: 0.914
+
+| condition | seeds | centre AUC | sampled AUC | centre logloss | sampled logloss | sampled ECE | centre KL | sampled KL |
+|---|---|---|---|---|---|---|---|---|
+| tnbbeta_free | 5 | 0.884 ± 0.003 | 0.883 ± 0.004 | 0.439 | 0.452 | 0.085 | 0.072 | 0.076 |
+| tnbbeta_m-6 | 5 | 0.884 ± 0.004 | 0.883 ± 0.003 | 0.444 | 0.457 | 0.096 | 0.077 | 0.081 |
+| tnbbeta_m-4 | 5 | 0.885 ± 0.004 | 0.884 ± 0.004 | 0.444 | 0.457 | 0.095 | 0.082 | 0.086 |
+| tnbbeta_m-2 | 5 | 0.884 ± 0.003 | 0.883 ± 0.003 | 0.437 | 0.448 | 0.077 | 0.075 | 0.077 |
+| tnbbeta_m-0.5 | 5 | 0.884 ± 0.003 | 0.883 ± 0.003 | 0.434 | 0.445 | 0.076 | 0.072 | 0.074 |
+| tnbbeta_m1 | 5 | 0.884 ± 0.003 | 0.884 ± 0.003 | 0.434 | 0.445 | 0.075 | 0.071 | 0.074 |
+| tnbbeta_m3.75 | 5 | 0.883 ± 0.003 | 0.883 ± 0.003 | 0.429 | 0.439 | 0.067 | 0.063 | 0.064 |
+| tnbbeta_m7.5 | 5 | 0.883 ± 0.004 | 0.883 ± 0.004 | 0.435 | 0.445 | 0.073 | 0.075 | 0.077 |
+| vmf_free | 5 | 0.884 ± 0.003 | 0.882 ± 0.002 | 0.429 | 0.442 | 0.072 | 0.064 | 0.057 |
+| vmf_k1 | 5 | 0.884 ± 0.004 | 0.872 ± 0.007 | 0.479 | 0.532 | 0.161 | 0.151 | 0.172 |
+| power_spherical_free | 5 | 0.884 ± 0.003 | 0.882 ± 0.002 | 0.429 | 0.439 | 0.068 | 0.064 | 0.054 |
+| power_spherical_k1 | 5 | 0.882 ± 0.003 | 0.868 ± 0.004 | 0.489 | 0.585 | 0.213 | 0.183 | 0.241 |
+| gaussian | 5 | 0.876 ± 0.005 | 0.875 ± 0.005 | 0.448 | 0.447 | 0.069 | 0.050 | 0.048 |
+
+Sampled KL to the true pair probabilities, by pair kind
+
+| condition | far | mid | near |
+|---|---|---|---|
+| tnbbeta_free | 0.089 | 0.065 | 0.054 |
+| tnbbeta_m-6 | 0.099 | 0.066 | 0.056 |
+| tnbbeta_m-4 | 0.106 | 0.073 | 0.049 |
+| tnbbeta_m-2 | 0.090 | 0.074 | 0.044 |
+| tnbbeta_m-0.5 | 0.085 | 0.073 | 0.043 |
+| tnbbeta_m1 | 0.086 | 0.072 | 0.044 |
+| tnbbeta_m3.75 | 0.069 | 0.067 | 0.044 |
+| tnbbeta_m7.5 | 0.089 | 0.076 | 0.042 |
+| vmf_free | 0.051 | 0.064 | 0.063 |
+| vmf_k1 | 0.246 | 0.096 | 0.087 |
+| power_spherical_free | 0.049 | 0.059 | 0.060 |
+| power_spherical_k1 | 0.361 | 0.115 | 0.112 |
+| gaussian | 0.015 | 0.080 | 0.088 |
+
+Posterior shape (seed means)
+
+| condition | r_bar | second_mode_mass | frac_nodes_second_mode | m_mean |
+|---|---|---|---|---|
+| tnbbeta_free | 0.950 | 0.000 | 0.000 | -4.121 |
+| tnbbeta_m-6 | 0.949 | 0.000 | 0.000 | -6.000 |
+| tnbbeta_m-4 | 0.946 | 0.000 | 0.000 | -4.000 |
+| tnbbeta_m-2 | 0.947 | 0.000 | 0.000 | -2.000 |
+| tnbbeta_m-0.5 | 0.946 | 0.000 | 0.000 | -0.500 |
+| tnbbeta_m1 | 0.945 | 0.000 | 0.000 | 1.000 |
+| tnbbeta_m3.75 | 0.946 | 0.000 | 0.000 | 3.750 |
+| tnbbeta_m7.5 | 0.948 | 0.000 | 0.000 | 7.500 |
+| vmf_free | 0.882 | 0.000 | 0.000 | - |
+| vmf_k1 | 0.614 | 0.000 | 0.000 | - |
+| power_spherical_free | 0.860 | 0.000 | 0.000 | - |
+| power_spherical_k1 | 0.523 | 0.001 | 0.000 | - |
+| gaussian | 2.233 | nan | nan | - |
+
+### Paired sampled KL to the truth (other minus free TNBBeta; positive means free TNBBeta is better)
+
+| condition | mean difference | free TNBBeta better in |
+|---|---|---|
+| tnbbeta m=-6 | +0.0058 | 2/5 |
+| tnbbeta m=-4 | +0.0105 | 2/5 |
+| tnbbeta m=-2 | +0.0017 | 1/5 |
+| tnbbeta m=-0.5 | -0.0016 | 1/5 |
+| tnbbeta m=1 | -0.0015 | 1/5 |
+| tnbbeta m=3.75 | -0.0114 | 1/5 |
+| tnbbeta m=7.5 | +0.0012 | 3/5 |
+| vmf free | -0.0183 | 0/5 |
+| vmf kappa=d | +0.0962 | 5/5 |
+| power_spherical free | -0.0216 | 1/5 |
+| power_spherical kappa=d | +0.1658 | 5/5 |
+| gaussian | -0.0275 | 0/5 |
+
+### Reading
+
+- **No benefit from bimodality.** Centre AUC is 0.883-0.885 for every TNBBeta setting (oracle
+  0.914) and sampled KL ranges only 0.064-0.086 across `m` from -6 to 7.5. The unimodal settings
+  are no worse: `m=3.75` has the lowest TNBBeta KL (0.064) and beats free TNBBeta in 4/5
+  seeds, while `m=-6` and `m=-4` are slightly worse (0.081, 0.086). With 5 seeds the trend over
+  `m` is suggestive at most.
+- **The earlier `latent_sphere` lead was the unrepresentable offset.** There free TNBBeta beat
+  every condition in 5/5 seeds; here it is behind the Gaussian (0.048), free power-spherical
+  (0.054) and free vMF (0.057) on sampled KL (0/5, 1/5 and 0/5 paired seeds for free TNBBeta),
+  and ahead only of the pinned-kappa baselines.
+- **Free TNBBeta lands at `m` about -4.1 (all five seeds below zero) but puts no mass in a
+  second mode.** `second_mode_mass` is 0.000 and `frac_nodes_second_mode` 0.000 for free TNBBeta,
+  for every pinned `m` (including -6), and for every other family. Its `r_bar` is 0.95, the same
+  0.945-0.95 as every pinned `m`: the posterior is a single thick cap whatever `m` is. One seed
+  has `p` = 0.02 instead of about 0.97, the antipodal gauge of the same shape.
+  So `m < 0` (the density has an antipodal mode) does not mean the trained posterior is
+  bimodal in the sense of using both modes, at least on this graph.
+- Pinned-kappa vMF/PS lose to everything on calibration (ECE 0.16 and 0.21 against 0.07-0.09),
+  as on the earlier graphs. Free vMF and PS learn kappa here (`r_bar` 0.88 and 0.86), unlike on
+  the real graphs, because of the denser and cleaner signal; this was not investigated.
+
+**Standing conclusion.** Across nine graph families, including one the decoder represents exactly,
+no setting shows a benefit from TNBBeta's bimodality, and free TNBBeta does not even use a
+second mode. What TNBBeta does show is better calibration than pinned-kappa vMF/PS here, and,
+on the real graphs in the earlier notes, it is matched by pinned-kappa vMF/PS (kappa = d). The claim to test next is the opposite one: whether `m < 0` is merely where the
+parameterization is easiest to optimize (a "free" posterior shape), not where it is
+expressively useful.
+
+### Not done
+
+- The `m` sweep is one graph; the sign of the trend over `m` (negative worse) needs more seeds.
+- Real graphs were not re-run with `decoder_bias` or with `second_mode_mass`.
