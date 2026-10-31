@@ -74,6 +74,8 @@ def collect(
     found = {}
     for condition in conditions or CONDITIONS:
         path = directory / f"{prefix}_{graph}_{condition}.json"
+        if not path.exists():  # single-graph sweeps name files <prefix>_<condition>
+            path = directory / f"{prefix}_{condition}.json"
         if path.exists():
             found[condition] = json.loads(path.read_text())["runs"]
     return found
@@ -128,8 +130,8 @@ def kind_table(conditions: dict[str, list[dict]]) -> str:
 
 
 def shape_table(conditions: dict[str, list[dict]]) -> str:
-    """Markdown table of ``r_bar``, antipodal mass and (TNBBeta) ``m`` per condition."""
-    columns = ["r_bar", "antipodal_mass", "frac_nodes_antipodal", "m_mean"]
+    """Markdown table of ``r_bar``, second-mode mass and (TNBBeta) ``m`` per condition."""
+    columns = ["r_bar", "second_mode_mass", "frac_nodes_second_mode", "m_mean"]
     lines = [
         "| condition | " + " | ".join(columns) + " |",
         "|" + "---|" * (len(columns) + 1),

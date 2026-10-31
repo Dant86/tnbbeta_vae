@@ -213,9 +213,9 @@ def evaluate_graph_model(
         per pair kind, over non-training pairs), and ``posterior`` /
         ``posterior_by_block`` (``posterior_stats`` over every node and over each
         block: ``r_bar`` and, for TNBBeta, ``p`` / ``q`` / ``epsilon`` / ``m`` and
-        ``frac_bimodal``; ``posterior`` also holds ``antipodal_mass``, the share of
-        samples in the hemisphere opposite each node's mean direction, and
-        ``frac_nodes_antipodal`` the share of nodes with more than 10% there).
+        ``frac_bimodal``; ``posterior`` also holds ``second_mode_mass``, the mean over
+        nodes of the share of samples in the lesser hemisphere about the node's mean
+        direction, and ``frac_nodes_second_mode`` the share of nodes with over 10%).
     """
     device = next(model.parameters()).device
     batch = GraphBatch(
@@ -271,7 +271,7 @@ def evaluate_graph_model(
         config = model.config.model_dump()
         everyone = torch.ones(sample.block.shape[0], dtype=torch.bool, device=device)
         result["posterior"] = posterior_stats(posterior, everyone, config)
-        result["posterior"].update(_antipodal_mass(posterior, num_samples))
+        result["posterior"].update(_second_mode_mass(posterior, num_samples))
         result["posterior_by_block"] = {
             str(b): posterior_stats(
                 posterior, torch.as_tensor(sample.block == b, device=device), config
@@ -281,21 +281,28 @@ def evaluate_graph_model(
     return result
 
 
-def _antipodal_mass(posterior: Any, num_samples: int) -> dict[str, float]:
-    """Mass a posterior puts opposite its mean direction (``nan`` for the Gaussian).
+def _second_mode_mass(posterior: Any, num_samples: int) -> dict[str, float]:
+    """Mass a posterior puts in its lesser hemisphere about its axis (nan: Gaussian).
 
     ``r_bar`` cancels for antipodal mixtures, so it cannot show how much of a bimodal
-    posterior's mass sits in the second mode; this counts samples with a negative inner
-    product with the node's mean direction instead.
+    posterior's mass sits in the second mode. For each node this counts the share of
+    samples with a negative inner product with its mean direction, then takes the
+    smaller of that share and its complement: a TNBBeta with ``p`` near 0 puts all its
+    mass at the antipode, which is a unimodal cap pointing the other way, not a second
+    mode.
     """
     direction = getattr(posterior, "mean_direction", getattr(posterior, "loc", None))
     if direction is None:
-        return {"antipodal_mass": float("nan"), "frac_nodes_antipodal": float("nan")}
+        return {
+            "second_mode_mass": float("nan"),
+            "frac_nodes_second_mode": float("nan"),
+        }
     samples = posterior.rsample(torch.Size([num_samples]))
     opposite = ((samples * direction).sum(-1) < 0).float().mean(dim=0)
+    lesser = torch.minimum(opposite, 1 - opposite)
     return {
-        "antipodal_mass": float(opposite.mean()),
-        "frac_nodes_antipodal": float((opposite > 0.1).float().mean()),
+        "second_mode_mass": float(lesser.mean()),
+        "frac_nodes_second_mode": float((lesser > 0.1).float().mean()),
     }
 
 
