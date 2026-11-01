@@ -118,3 +118,24 @@ for PS of 30).
   TNBBeta's cap lies outside the grid at both ends.
 - The H-grid survivors with a `geometric` config have second-mode mass 0.000: those wins
   are not bimodal.
+
+## Post hoc: many TNBBeta posteriors never leave their initialisation (2026-11-01, exploratory)
+Scripts: scratchpad `plateau.py` (reads the 7,680 tnbbeta and vmf_init discovery runs) and
+`init_rbar.py` (untrained models on a `bipartite-00` draw, three seeds).
+- The untrained TNBBeta head already gives `r_bar` 0.097, second-mode mass 0.43 and
+  E|z.mu| 0.49 -- exactly the numbers the axis diagnostic found at `r_bar` = 0.10. Untrained
+  vMF / PS (kappa = 16) give `r_bar` 0.614 / 0.523, E|z.mu| 0.61 / 0.52, matching the
+  trained values there. So in those six configs no family's posterior moved.
+- Discovery TNBBeta runs: `r_bar` is bimodal (spike at 0.095-0.11, spike at 0.9-1.0).
+  1,002 of 3,840 runs (26%) sit at `r_bar` < 0.12, with median best epoch 6 (rest: 207) and
+  mean validation AUC 0.607 (rest: 0.717). Share at that plateau by family:
+  bipartite 0.61, degree_corrected 0.59, mixed_membership 0.35, ring 0.34, scale_free
+  0.31, assortative 0.13, geometric 0.10, latent_kernel 0.09, hierarchical 0.08,
+  core_periphery 0.02. Plateau fraction per config is 0 (40 configs), mixed (65), 1 (15).
+- Median trained vMF_init `r_bar` is 0.624 against 0.614 untrained: vMF barely moves too.
+- Mean `r_bar` rises with learning rate (0.43 at 0.003, 0.69 at 0.01, 0.78 at 0.03), and
+  the pilot picked the lowest rate (0.003) for TNBBeta on bipartite, degree_corrected and
+  ring, the families with the largest plateau shares. The pilot tuned on sampled log loss,
+  which a stuck, diffuse posterior may favour (hypothesis, not tested).
+- Consequence: the diffuse-regime wins are largely a comparison of initial posteriors
+  (TNBBeta's is diffuse, kappa = 16's is not), consistent with kappa = 4 matching them.
