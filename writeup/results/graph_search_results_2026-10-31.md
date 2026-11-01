@@ -159,3 +159,178 @@ Posterior shape of TNBBeta by graph family (means over the confirmed configs' dr
 - `cal_slope_dev` wins are large in magnitude (mean differences up to 3.8) because vMF/PS calibration
   slopes are far from 1; the slope is clipped to [0, 20] and the test is rank-based, so a few extreme
   runs do not drive it.
+
+
+## Exploratory characterisation: what shape do the wins have? (post hoc, not pre-registered)
+
+- **Code:** `7b40b65` (`apps/eval/graph_search_explore.py`). Commands:
+
+  ```bash
+  uv run python -m apps.eval.graph_search_explore aggregate --stage discovery
+  uv run python -m apps.eval.graph_search_explore report --stage discovery
+  ```
+
+- All 120 discovery configs, 32 draws each, TNBBeta against the tuned vMF and power-spherical
+  (kappa initialised at `d`). A "clear win" is a paired standardized effect (mean over SD of the per-draw
+  differences) above 0.5 against **both** comparators, a "clear loss" below -0.5 against both. This is a
+  descriptive threshold, not a test; the confirmed pairs above remain the inferential result. Everything
+  here is a candidate hypothesis to be tested on a fresh set of configs.
+
+#### 1. Per metric: configs where TNBBeta is clearly better / worse than both
+
+(paired standardized effect beyond +/-0.5, both primary comparators)
+
+| metric | clear win | clear loss | median advantage (dz) |
+|---|---|---|---|
+| centre_auc | 1 | 27 | -0.27 |
+| sampled_log_loss | 27 | 20 | -0.28 |
+| cal_slope_dev | 26 | 16 | -0.20 |
+| uncertainty_auroc | 14 | 14 | -0.19 |
+| truth_kl | 21 | 23 | -0.24 |
+| rank_corr | 1 | 35 | -0.37 |
+| sampled_auc | 13 | 24 | -0.26 |
+
+#### 2. Win profiles over (centre AUC, log loss, calibration slope, truth KL)
+
+`+` clear win over both comparators, `-` clear loss to both, `0` neither.
+
+| profile | configs |
+|---|---|
+| `0000` | 40 |
+| `00+0` | 11 |
+| `0+0+` | 9 |
+| `--0-` | 9 |
+| `00-0` | 5 |
+| `-000` | 5 |
+| `0++0` | 4 |
+| `0-0-` | 4 |
+| `-0-0` | 3 |
+| `000-` | 3 |
+
+#### 3. Correlation across configs of TNBBeta's advantage between metrics
+
+Spearman rho of the standardized advantage over the configs.
+
+| | centre_auc | sampled_log_loss | cal_slope_dev | uncertainty_auroc | truth_kl | rank_corr | sampled_auc |
+|---|---|---|---|---|---|---|---|
+| centre_auc | +1.00 | +0.36 | +0.04 | +0.33 | +0.34 | +0.66 | +0.68 |
+| sampled_log_loss | +0.36 | +1.00 | +0.22 | +0.36 | +0.91 | +0.38 | +0.56 |
+| cal_slope_dev | +0.04 | +0.22 | +1.00 | +0.19 | +0.16 | -0.07 | +0.04 |
+| uncertainty_auroc | +0.33 | +0.36 | +0.19 | +1.00 | +0.28 | +0.30 | +0.52 |
+| truth_kl | +0.34 | +0.91 | +0.16 | +0.28 | +1.00 | +0.37 | +0.48 |
+| rank_corr | +0.66 | +0.38 | -0.07 | +0.30 | +0.37 | +1.00 | +0.66 |
+| sampled_auc | +0.68 | +0.56 | +0.04 | +0.52 | +0.48 | +0.66 | +1.00 |
+
+#### 4. Calibration slope and worse-than-chance share, by family
+
+Each cell is `median slope / share of configs with sampled log loss > ln 2`.
+A slope above 1 is under-confident, below 1 over-confident; a log loss above
+ln 2 is worse than predicting 50% for every pair.
+
+| family | tnbbeta | vmf_init | power_spherical_init | gaussian |
+|---|---|---|---|---|
+| assortative | 1.05 / 0.25 | 1.37 / 0.17 | 1.80 / 0.17 | 0.99 / 0.33 |
+| bipartite | 0.29 / 0.75 | 0.15 / 1.00 | 0.22 / 0.83 | 0.83 / 0.50 |
+| core_periphery | 0.92 / 0.42 | 1.06 / 0.08 | 1.05 / 0.33 | 1.05 / 0.25 |
+| hierarchical | 0.91 / 0.25 | 1.19 / 0.25 | 1.13 / 0.25 | 1.01 / 0.25 |
+| mixed_membership | 0.47 / 0.83 | 0.35 / 0.83 | 0.51 / 0.75 | 0.96 / 0.67 |
+| latent_kernel | 0.66 / 0.67 | 0.80 / 0.50 | 0.64 / 0.67 | 0.60 / 0.58 |
+| geometric | 0.76 / 0.58 | 0.99 / 0.25 | 1.23 / 0.17 | 0.93 / 0.42 |
+| ring | 0.90 / 0.33 | 1.32 / 0.17 | 1.50 / 0.17 | 0.90 / 0.25 |
+| scale_free | 1.14 / 0.42 | 0.67 / 0.92 | 0.84 / 0.75 | 1.84 / 0.08 |
+| degree_corrected | 0.33 / 0.67 | 1.30 / 0.33 | 1.59 / 0.33 | 1.14 / 0.08 |
+
+#### 5. Association of TNBBeta's advantage with graph attributes
+
+Spearman rho; q is BH over all 48 tests; *within family* removes family means. Only rows
+with q <= 0.1 in either column are shown.
+
+| metric | attribute | rho pooled | q | rho within family | q |
+|---|---|---|---|---|---|
+| centre_auc | log_num_nodes | -0.27 | 0.020 | -0.26 | 0.036 |
+| centre_auc | informative_features | +0.34 | 0.003 | +0.33 | 0.003 |
+| sampled_log_loss | log_mean_degree | +0.25 | 0.028 | +0.15 | 0.315 |
+| cal_slope_dev | achieved_auc | +0.33 | 0.003 | +0.40 | 0.000 |
+| truth_kl | log_num_nodes | -0.21 | 0.079 | -0.20 | 0.119 |
+| truth_kl | log_mean_degree | +0.28 | 0.016 | +0.20 | 0.119 |
+
+#### 6. By TNBBeta posterior regime (config mean of r_bar)
+
+Clear wins over both comparators per headline metric.
+
+| regime | configs | TNB r_bar | vMF r_bar | second-mode mass | win centre_auc | win sampled_log_loss | win cal_slope_dev | win truth_kl | families |
+|---|---|---|---|---|---|---|---|---|---|
+| tight (r_bar > 0.8) | 44 | 0.90 | 0.72 | 0.012 | 1 | 7 | 16 | 4 | assortative (6), core_periphery (6), degree_corrected (1), geometric (9), hierarchical (4), latent_kernel (9), mixed_membership (2), ring (7) |
+| middle (0.5 - 0.8) | 36 | 0.66 | 0.68 | 0.081 | 0 | 5 | 6 | 5 | assortative (4), bipartite (4), core_periphery (6), degree_corrected (3), geometric (2), hierarchical (8), latent_kernel (2), mixed_membership (4), ring (1), scale_free (2) |
+| diffuse (< 0.5) | 40 | 0.27 | 0.65 | 0.305 | 0 | 15 | 4 | 12 | assortative (2), bipartite (8), degree_corrected (8), geometric (1), latent_kernel (1), mixed_membership (6), ring (4), scale_free (10) |
+
+#### 7. By regime: learnability, absolute log loss and calibration slope
+
+Means over the regime's configs. `>ln2` is the share with sampled log loss
+above ln 2 (worse than predicting 50%).
+
+| regime | configs | oracle AUC | log loss tnbbeta | log loss vmf_init | log loss power_spherical_init | log loss gaussian | slope tnbbeta / vmf / ps | >ln2 tnbbeta / vmf / ps |
+|---|---|---|---|---|---|---|---|---|
+| tight | 44 | 0.817 | 0.631 | 0.598 | 0.613 | 0.653 | 0.88 / 1.25 / 1.23 | 0.39 / 0.09 / 0.18 |
+| middle | 36 | 0.782 | 0.732 | 0.659 | 0.696 | 0.669 | 0.86 / 0.77 / 0.94 | 0.39 / 0.50 / 0.44 |
+| diffuse | 40 | 0.754 | 0.730 | 0.746 | 0.696 | 0.707 | 0.45 / 0.47 / 0.54 | 0.78 / 0.80 / 0.72 |
+
+Spearman(TNBBeta r_bar, oracle AUC) over all configs: +0.37.
+Within the diffuse regime, Spearman(second_mode_mass, sampled_log_loss advantage) = -0.34 (n = 40).
+Within the diffuse regime, Spearman(oracle AUC, sampled_log_loss advantage) = -0.43 (n = 40).
+Within the tight regime, Spearman(oracle AUC, cal_slope_dev advantage) = +0.54 (n = 44).
+The 16 tight-regime configs with a clear cal_slope_dev win: median calibration slope 1.16 / 1.85 / 1.97 and mean log loss 0.500 / 0.519 / 0.529 (tnbbeta / vmf / ps).
+The 15 diffuse-regime configs with a clear sampled_log_loss win: median calibration slope 0.93 / 0.19 / 0.29 and mean log loss 0.686 / 0.776 / 0.722 (tnbbeta / vmf / ps).
+
+### What this says (hypotheses, in order of how well the data support them)
+
+1. **The wins are about probability quality, never ranking.** Clear wins against both comparators:
+   centre AUC 1 (27 clear losses), rank correlation 1 (35 losses), versus log loss 27 (20 losses),
+   calibration slope 26 (16 losses), truth KL 21 (23 losses). The metrics form three groups by how
+   TNBBeta's advantage correlates across configs: *ranking* (centre AUC, rank correlation, sampled
+   AUC, rho 0.66-0.68), *probability accuracy* (log loss and truth KL, rho 0.91), and *calibration
+   slope*, which is nearly independent of the rest (rho -0.07 to 0.22). 40 of 120 configs show no
+   clear effect on any of the four headline metrics.
+2. **There are two different kinds of win, in two different graph situations**, separable by TNBBeta's
+   own posterior (r_bar > 0.8 "tight", < 0.5 "diffuse"); the regime is an outcome of training and
+   partly tracks learnability (Spearman with oracle AUC +0.37), so it is a stratification, not a cause.
+   - **Tight regime (44 configs; assortative, geometric, ring, latent-kernel, core-periphery,
+     hierarchical graphs with higher oracle AUC, 0.82 on average).** TNBBeta learns a tight posterior
+     (r_bar 0.90, second-mode mass 0.012) while vMF and PS stay at r_bar 0.72 and are under-confident
+     (median calibration slope 1.85 and 1.97 where TNBBeta wins, against TNBBeta's 1.16). Its wins
+     here are the calibration slope (16 configs; 11 of the 20 confirmed pairs in this regime) and the
+     advantage grows with signal strength (Spearman with oracle AUC +0.54). But across all 44 tight
+     configs TNBBeta's mean log loss is **worse** than vMF's and PS's (0.631 against 0.598 and 0.613):
+     the win is concentrated in the 16 configs where its log loss is also slightly better (0.500
+     against 0.519 and 0.529), and it loses in the rest.
+   - **Diffuse regime (40 configs; bipartite, scale-free, degree-corrected, mixed-membership, some ring
+     graphs, with the lowest oracle AUC, 0.75 on average).** TNBBeta's posterior is diffuse (r_bar 0.27)
+     with substantial mass in a second mode (0.305). Its wins here are log loss and truth KL (15 and 12
+     configs; 14 of the 15 confirmed pairs in this regime): where vMF and PS are *over*-confident
+     (median calibration slopes 0.19 and 0.29) and their log loss exceeds ln 2 (0.776 and 0.722 in the
+     winning configs), TNBBeta stays near the base rate (0.686, slope 0.93). That is, it wins by being
+     the least over-confident model on graphs that none of the models can learn well. Within this regime
+     the advantage is larger on the *least* learnable graphs (Spearman with oracle AUC -0.43) and does
+     not increase with second-mode mass (-0.34), so the data do not support "using the second mode
+     produces the win".
+3. **Graph-type commonality.** The tight-regime wins are on graphs whose structure a dot-product
+   decoder on a sphere can represent (geometric, ring, latent-kernel, assortative, core-periphery,
+   hierarchical); the diffuse-regime wins are on graphs it largely cannot (bipartite, scale-free and
+   degree-corrected, which need node-specific degree, and overlapping mixed-membership). The graph
+   attributes explain little *within* a family: TNBBeta's calibration advantage rises with signal
+   strength (rho +0.40 within family, q < 0.001), its centre-AUC deficit is smaller with informative
+   features (+0.33) and on smaller graphs (-0.26 with log size), and its log-loss and KL advantage rise
+   with mean degree only when pooled across families (+0.25, +0.28; not significant within family).
+
+### What this does not show
+
+- **A calibration-slope win is not a better model.** The slope can be fixed after training with one
+  parameter fitted on validation edges, so a recalibrated vMF or PS may erase the tight-regime wins
+  (and part of the diffuse ones). The pre-registered metrics did not include a recalibrated
+  comparator; without it these wins may reflect the comparators' temperature, not the posterior family.
+- **The causal reading is untested.** "TNBBeta reaches the concentration a graph needs and vMF/PS stay
+  near where they started" fits the r_bar and slope numbers (vMF/PS r_bar 0.55-0.73 on every family)
+  but has not been intervened on. It predicts that vMF/PS with kappa fixed per graph, and the same
+  after recalibration, close the gap.
+- The regime split uses TNBBeta's own trained posterior and the 0.5 thresholds are arbitrary; none of
+  these associations was pre-registered, and the attribute table has 48 tests (BH-corrected).
