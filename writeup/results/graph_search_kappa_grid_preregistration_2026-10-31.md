@@ -16,7 +16,7 @@ distribution shape.
 ## Design
 - Configs: the 30 with a confirmed pair (ids below), on fresh graphs: seed base
   30,000,000, 32 draws each (paired by graph, split and seed across conditions).
-- Conditions: `tnbbeta`, `vmf_init`, `power_spherical_init` (re-run on the new draws) and
+- Conditions (the `--conditions` list below): `tnbbeta`, `vmf_init`, `power_spherical_init` (re-run on the new draws) and
   vMF / PS with kappa fixed at each of {4, 8, 16, 32, 64, 128} (`vmf_k<kappa>`,
   `power_spherical_k<kappa>`): 15 conditions, 14,400 runs. Learning rate: the pilot's
   tuned rate of the matching `_init` condition. All else as discovery (500 epochs, d=16,
@@ -59,8 +59,10 @@ core_periphery-05 core_periphery-07 core_periphery-10 degree_corrected-00 \
 degree_corrected-03 degree_corrected-09 geometric-01 geometric-05 geometric-09 \
 geometric-10 hierarchical-00 hierarchical-08 hierarchical-11 mixed_membership-06 \
 ring-00 ring-01 ring-03 ring-11 scale_free-08"
+CONDS="tnbbeta vmf_init power_spherical_init"
+for k in 4 8 16 32 64 128; do CONDS="$CONDS vmf_k$k power_spherical_k$k"; done
 uv run python -m apps.synthetic.graph_search manifest --stage kappa_grid \
-    --configs discovery --config-ids $CFG --draws 32
+    --configs discovery --config-ids $CFG --draws 32 --conditions $CONDS
 STAGE=kappa_grid sbatch --array=0-23 scripts/slurm/graph_search.sbatch
 uv run python -m apps.eval.graph_search_kappa report --output <report.md>
 ```
