@@ -22,6 +22,7 @@ skipped on resubmission).
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import asdict
 import json
 import math
@@ -67,7 +68,14 @@ DIM = 16
 EPOCHS = 500
 SAMPLES = 32
 LEARNING_RATES = (0.003, 0.01, 0.03)
-SEED_BASE = {"pilot": 9_000_000, "discovery": 10_000_000, "confirmation": 20_000_000}
+SEED_BASE = {
+    "pilot": 9_000_000,
+    "discovery": 10_000_000,
+    "confirmation": 20_000_000,
+    "kappa_grid": 30_000_000,
+}
+# Fixed-kappa grid of the ``kappa_grid`` stage (diffuse to tight; ``DIM`` is the pin).
+KAPPA_GRID = (4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
 # Conditions and the model each trains. ``_init`` starts kappa at ``DIM`` and trains it
 # (the primary comparator), ``_pin`` fixes it there, ``_default`` is the repo's default.
 CONDITIONS = {
@@ -80,6 +88,12 @@ CONDITIONS = {
     "power_spherical_default": ("power_spherical", {}),
     "gaussian": ("gaussian", {}),
 }
+for _kappa in KAPPA_GRID:
+    CONDITIONS[f"vmf_k{_kappa:g}"] = ("vmf", {"fixed_kappa": _kappa})
+    CONDITIONS[f"power_spherical_k{_kappa:g}"] = (
+        "power_spherical",
+        {"fixed_kappa": _kappa},
+    )
 _TUNED = ("tnbbeta", "vmf_init", "power_spherical_init", "gaussian")
 _SECONDARY_LR_FROM = {
     "vmf_pin": "vmf_init",
@@ -88,6 +102,9 @@ _SECONDARY_LR_FROM = {
     "power_spherical_default": "power_spherical_init",
 }
 _AUC_TOLERANCE = 0.02
+for _name, (_family, _extra) in list(CONDITIONS.items()):
+    if "fixed_kappa" in _extra and _name not in _SECONDARY_LR_FROM:
+        _SECONDARY_LR_FROM[_name] = f"{_family}_init"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -214,7 +231,8 @@ def build_manifest(
     Returns:
         Run descriptions with a unique ``run_id``.
     """
-    names = conditions or (list(_TUNED) if stage == "pilot" else list(CONDITIONS))
+    default = [c for c in CONDITIONS if "_k" not in c or stage == "kappa_grid"]
+    names = conditions or (list(_TUNED) if stage == "pilot" else default)
     items = []
     for index, config in enumerate(configs):
         for draw in range(first_draw, first_draw + draws):
@@ -401,6 +419,7 @@ def evaluate(
     mean, spread = draws.mean(0), draws.std(0)
     num_positive = positive.shape[1]
     slope, intercept = calibration_slope(mean, targets)
+    recalibrate = _validation_recalibration(model, samples, split, device)
 
     truth = balanced_truth(torch.as_tensor(sample.probability, dtype=torch.float32))
     train_dense = split.train_adjacency.toarray() == 0
@@ -434,10 +453,47 @@ def evaluate(
         "cal_slope_dev": abs(slope - 1.0),
         "uncertainty_auroc": uncertainty_error_auroc(mean, spread, targets),
         "truth_kl": float(bernoulli_kl(truth[held_mask], dense[held_mask])),
+        "recal_log_loss": float(bernoulli_log_loss(recalibrate(mean), targets)),
+        "recal_truth_kl": float(
+            bernoulli_kl(truth[held_mask], recalibrate(dense)[held_mask])
+        ),
         "rank_corr": float(statistic),
         **{f"post_{k}": float(v) for k, v in stats.items() if k != "num_nodes"},
         **second_mode_mass(posterior, SAMPLES),
     }
+
+
+def _validation_recalibration(
+    model: GraphVAE, samples: torch.Tensor, split: LinkSplit, device: torch.device
+) -> Callable[[torch.Tensor], torch.Tensor]:
+    """Returns a one-parameter-pair Platt map fitted on the validation pairs.
+
+    The map is ``p -> sigmoid(intercept + slope * logit(p))`` with both fitted on the
+    mean sampled prediction at the validation edges and non-edges, then applied to
+    test-time predictions, so it separates a model's ranking and shape from its
+    overall temperature.
+    """
+    pairs = torch.as_tensor(
+        np.concatenate([split.val_positive, split.val_negative], axis=1), device=device
+    )
+    targets = torch.cat(
+        [
+            torch.ones(split.val_positive.shape[1]),
+            torch.zeros(split.val_negative.shape[1]),
+        ]
+    )
+    mean = (
+        torch.stack([torch.sigmoid(model.link_logits(z, pairs)) for z in samples])
+        .mean(0)
+        .cpu()
+    )
+    slope, intercept = calibration_slope(mean, targets)
+
+    def recalibrate(probability: torch.Tensor) -> torch.Tensor:
+        clipped = probability.clamp(1e-6, 1 - 1e-6)
+        return torch.sigmoid(intercept + slope * torch.logit(clipped))
+
+    return recalibrate
 
 
 def _sample_pairs(mask: np.ndarray, seed: int, count: int = 200_000) -> np.ndarray:

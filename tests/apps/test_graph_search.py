@@ -68,7 +68,7 @@ def test_discovery_manifest_uses_tuned_rates_and_secondaries_inherit_theirs() ->
     items = build_manifest("discovery", [_config()], draws=1, tuned_lr=tuned)
     rate = {i["condition"]: i["lr"] for i in items}
 
-    assert set(rate) == set(CONDITIONS)
+    assert set(rate) == {c for c in CONDITIONS if "_k" not in c}
     assert rate["vmf_init"] == rate["vmf_pin"] == rate["vmf_default"] == 0.03
     assert rate["power_spherical_pin"] == 0.01
 
@@ -113,3 +113,15 @@ def test_run_item_reports_every_metric_finite(
         assert math.isfinite(metrics[key]), key
     assert 0.0 <= metrics["centre_auc"] <= 1.0
     assert result["seconds"] > 0
+
+
+def test_kappa_grid_stage_adds_fixed_kappa_conditions_at_the_init_rate() -> None:
+    tuned = {"ring": {c: 0.01 for c in ("tnbbeta", "vmf_init", "gaussian")}}
+    tuned["ring"]["vmf_init"] = 0.03
+    tuned["ring"]["power_spherical_init"] = 0.003
+    items = build_manifest("kappa_grid", [_config()], draws=1, tuned_lr=tuned)
+    rate = {i["condition"]: i["lr"] for i in items}
+
+    assert rate["vmf_k64"] == 0.03
+    assert rate["power_spherical_k4"] == 0.003
+    assert len({i["seed"] for i in items}) == 1
