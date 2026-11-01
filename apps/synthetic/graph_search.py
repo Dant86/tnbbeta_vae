@@ -73,6 +73,7 @@ SEED_BASE = {
     "discovery": 10_000_000,
     "confirmation": 20_000_000,
     "kappa_grid": 30_000_000,
+    "axis_diagnostic": 40_000_000,
 }
 # Fixed-kappa grid of the ``kappa_grid`` stage (diffuse to tight; ``DIM`` is the pin).
 KAPPA_GRID = (4.0, 8.0, 16.0, 32.0, 64.0, 128.0)

@@ -125,3 +125,18 @@ def test_kappa_grid_stage_adds_fixed_kappa_conditions_at_the_init_rate() -> None
     assert rate["vmf_k64"] == 0.03
     assert rate["power_spherical_k4"] == 0.003
     assert len({i["seed"] for i in items}) == 1
+
+
+def test_axis_diagnostic_stage_reuses_the_init_rates_with_its_own_seeds() -> None:
+    tuned = {"ring": {c: 0.01 for c in ("tnbbeta", "vmf_init", "gaussian")}}
+    tuned["ring"]["power_spherical_init"] = 0.003
+    items = build_manifest(
+        "axis_diagnostic",
+        [_config()],
+        draws=1,
+        conditions=["tnbbeta", "power_spherical_k4"],
+        tuned_lr=tuned,
+    )
+
+    assert {i["condition"]: i["lr"] for i in items}["power_spherical_k4"] == 0.003
+    assert all(i["seed"] >= 40_000_000 for i in items)

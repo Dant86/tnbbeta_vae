@@ -7,7 +7,11 @@ import math
 import pytest
 import torch
 
-from apps.synthetic.graph_families import PRESETS, train_and_evaluate
+from apps.synthetic.graph_families import (
+    PRESETS,
+    second_mode_mass,
+    train_and_evaluate,
+)
 from tnbbeta_vae.data.block_graph import assortative_spec, block_graph
 from tnbbeta_vae.models import GraphVAEConfig
 
@@ -52,3 +56,46 @@ def test_train_and_evaluate_reports_finite_metrics_for_centres_and_samples(
     assert 0.0 < result["posterior"]["r_bar"] <= 1.0
     assert ("frac_bimodal" in result["posterior"]) == (family == "tnbbeta")
     assert 0.0 <= result["posterior"]["second_mode_mass"] <= 0.5
+
+
+class _FakePosterior:
+    """Posterior stub drawing fixed-law samples about a fixed axis."""
+
+    def __init__(self, direction: torch.Tensor, kind: str) -> None:
+        self.mean_direction = direction
+        self._kind = kind
+
+    def rsample(self, shape: torch.Size) -> torch.Tensor:
+        nodes, dim = self.mean_direction.shape
+        if self._kind == "uniform":
+            z = torch.randn(*shape, nodes, dim)
+            return z / z.norm(dim=-1, keepdim=True)
+        sign = torch.where(torch.rand(*shape, nodes, 1) < 0.5, -1.0, 1.0)
+        z = sign * self.mean_direction + 0.01 * torch.randn(*shape, nodes, dim)
+        return z / z.norm(dim=-1, keepdim=True)
+
+
+def _axes(nodes: int, dim: int) -> torch.Tensor:
+    axis = torch.randn(nodes, dim)
+    return axis / axis.norm(dim=-1, keepdim=True)
+
+
+def test_axis_abs_cos_of_a_uniform_posterior_matches_the_uniform_baseline() -> None:
+    torch.manual_seed(0)
+    dim = 16
+    stats = second_mode_mass(_FakePosterior(_axes(300, dim), "uniform"), 64)
+
+    assert stats["axis_abs_cos"] == pytest.approx(
+        math.sqrt(2 / (math.pi * dim)), abs=0.03
+    )
+    assert stats["axis_abs_cos_node_spread"] < 0.05
+
+
+def test_axis_abs_cos_of_a_tight_antipodal_mixture_is_one_with_half_second_mass() -> (
+    None
+):
+    torch.manual_seed(0)
+    stats = second_mode_mass(_FakePosterior(_axes(100, 16), "antipodal"), 64)
+
+    assert stats["axis_abs_cos"] > 0.95
+    assert stats["second_mode_mass"] == pytest.approx(0.5, abs=0.05)

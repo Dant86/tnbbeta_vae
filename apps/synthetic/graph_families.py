@@ -290,17 +290,29 @@ def second_mode_mass(posterior: Any, num_samples: int) -> dict[str, float]:
     smaller of that share and its complement: a TNBBeta with ``p`` near 0 puts all its
     mass at the antipode, which is a unimodal cap pointing the other way, not a second
     mode.
+
+    Also returns ``axis_abs_cos``, the mean over nodes and samples of ``|z . mu_hat|``
+    on the same axis and samples, and ``axis_abs_cos_node_spread``, the standard
+    deviation over nodes of each node's mean ``|z . mu_hat|``. Unlike ``r_bar`` this is
+    invariant to ``z -> -z``: near ``sqrt(2 / (pi d))`` for a near-uniform posterior,
+    near 1 for a cap or an antipodal pair of tight modes (``second_mode_mass`` tells
+    those two apart).
     """
     direction = getattr(posterior, "mean_direction", getattr(posterior, "loc", None))
     if direction is None:
         return {
             "second_mode_mass": float("nan"),
             "frac_nodes_second_mode": float("nan"),
+            "axis_abs_cos": float("nan"),
+            "axis_abs_cos_node_spread": float("nan"),
         }
     samples = posterior.rsample(torch.Size([num_samples]))
     opposite = ((samples * direction).sum(-1) < 0).float().mean(dim=0)
     lesser = torch.minimum(opposite, 1 - opposite)
+    axis_cos = (samples * direction).sum(-1).abs().mean(dim=0)
     return {
+        "axis_abs_cos": float(axis_cos.mean()),
+        "axis_abs_cos_node_spread": float(axis_cos.std(unbiased=False)),
         "second_mode_mass": float(lesser.mean()),
         "frac_nodes_second_mode": float((lesser > 0.1).float().mean()),
     }
