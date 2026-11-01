@@ -98,3 +98,23 @@ pre-registration; report: `uv run python -m apps.eval.graph_search_kappa report`
 
 ### Concentration check (descriptive)
 - configs: 30; Spearman of TNBBeta r_bar vs the r_bar of the best vMF kappa (by log loss): +0.72
+## Post hoc: is TNBBeta's extra shape capacity used? (2026-11-01, exploratory)
+Script: scratchpad `smm_matched.py` (reads the kappa_grid runs). For each config, TNBBeta's
+mean `second_mode_mass` is compared with vMF / PS `second_mode_mass` interpolated, within
+the same config, at the same mean `r_bar` along the fixed-kappa grid. Only configs whose
+TNBBeta `r_bar` falls inside the comparator grid's range can be compared (18 for vMF, 15
+for PS of 30).
+- TNBBeta has more second-mode mass than a unimodal cap at the same `r_bar`: 0.066 vs
+  0.026 (vMF), 0.097 vs 0.031 (PS); never lower by more than 0.02, higher by more than
+  0.02 in 10 and 12 configs (Wilcoxon p = 8e-6, 6e-5; configs are not independent
+  tests and this was not pre-registered).
+- The excess is largest at mid concentration (`r_bar` 0.45-0.8): assortative-00 0.128 vs
+  0.000, bipartite-01 0.129 vs 0.023. The configs with the largest excess are not
+  among the 8 H-grid survivors.
+- Six configs (bipartite, degree-corrected-00, ring-01) have `r_bar` = 0.10, more
+  diffuse than any comparator on the grid (second-mode mass 0.43, near uniform's 0.5).
+  The geometric and hierarchical-08 configs have `r_bar` 0.95-0.99, tighter than the
+  kappa = 128 comparator, which explains why the best kappa sat at the grid edge there:
+  TNBBeta's cap lies outside the grid at both ends.
+- The H-grid survivors with a `geometric` config have second-mode mass 0.000: those wins
+  are not bimodal.
