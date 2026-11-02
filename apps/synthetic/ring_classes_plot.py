@@ -1,14 +1,17 @@
-"""Sphere figures for the four-class ring study: exact posterior next to fitted q's.
+"""Sphere figures for the four-class ring study: data, exact and fitted posteriors.
 
-For each design, one representative test ``x`` per class (the test ``x`` of that
-class whose true latitude is nearest a fixed target) is drawn as: the exact posterior,
-then the vMF, Power Spherical and TNBBeta posteriors fitted by the same seed, on an
-orthographic view of ``S^2`` with the class axis marked (star: ``+a``; open star:
-``-a``; the far side of the sphere is drawn faintly). One figure per (design, seed): an
-aligned TNBBeta seed and a non-aligned one when both exist.
+For each design and seed, one figure. The leftmost sphere (spanning every row) shows
+the true data distribution: latent samples ``z`` of the generative model coloured by
+class, with the class axes marked. Each row is one class (design 1: latitude band;
+design 2: class); its panels show one representative test ``x`` (the test ``x`` of that
+class whose true latitude is nearest a fixed target): the exact posterior, then the
+vMF, PowerSpherical and TNBBeta posteriors fitted by the same seed, on an orthographic
+view of ``S^2`` with the class axis marked (star: ``+a``; open star: ``-a``; the far
+side is drawn faintly). Rendered with plotly and the project's ``alptex`` template
+(``tnbbeta_vae.plotting``) through kaleido.
 
 Usage:
-    uv run --with matplotlib python -m apps.synthetic.ring_classes_plot \
+    uv run python -m apps.synthetic.ring_classes_plot \
         --out-dir ring_recovery/classes --fig-dir writeup/results/figures
 """
 
@@ -17,23 +20,27 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
-import matplotlib  # pyright: ignore[reportMissingImports]
 import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import torch
 
-from tnbbeta_vae.data.ring_classes import NUM_CLASSES, ring_class_task
+from tnbbeta_vae.data.ring_classes import (
+    BAND_EDGES,
+    NUM_CLASSES,
+    RingClassTask,
+    ring_class_task,
+)
 from tnbbeta_vae.distributions import PowerSpherical, TNBBetaSpherical, VonMisesFisher
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402  # pyright: ignore[reportMissingImports]
+from tnbbeta_vae.plotting import FONT_FAMILY, TEMPLATE_NAME
 
 COLORS = ("#2a78d6", "#eb6834", "#1baf7a", "#6250d6")
-MARKERS = ("o", "s", "^", "D")
-INK = "#0b0b0b"
-INK_SECONDARY = "#52514e"
-SURFACE = "#fcfcfb"
-GRID = "#d5d4cf"
+SYMBOLS = ("circle", "square", "triangle-up", "diamond")
+INK = "#1a1a1a"
+INK_SECONDARY = "#555555"
+OUTLINE = "#c8c8c8"
 TARGET_W = {1: (-0.75, -0.25, 0.25, 0.75), 2: (-0.6, -0.2, 0.2, 0.6)}
 FAMILIES = (
     ("exact", "exact posterior"),
@@ -42,12 +49,15 @@ FAMILIES = (
     ("tnbbeta", "TNBBeta"),
 )
 NUM_POINTS = 350
+NUM_DATA_POINTS = 3000
 VIEW_ANGLE_DEG = 50.0
+DATA_VIEW_DESIGN2 = np.array([0.6, 0.5, 0.62])
+MARKER_SIZE = 5
 
 
 def main(argv: list[str] | None = None) -> None:
     """Writes one figure per (design, representative seed)."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Class-sphere figures.")
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--fig-dir", type=Path, required=True)
     parser.add_argument("--date", default="2026-11-01")
@@ -91,10 +101,19 @@ def _figure(out_dir: Path, design: int, seed: int, kind: str, path: Path) -> Non
     summary = json.loads(
         (out_dir / f"design{design}" / "tnbbeta" / f"s{seed}.json").read_text()
     )
-    rng = torch.Generator().manual_seed(0)
-    fig, axes = plt.subplots(
-        NUM_CLASSES, len(FAMILIES), figsize=(13.0, 13.4), facecolor=SURFACE
+    specs = [[{"rowspan": NUM_CLASSES}, {}, {}, {}, {}]] + [
+        [None, {}, {}, {}, {}] for _ in range(NUM_CLASSES - 1)
+    ]
+    fig = make_subplots(
+        rows=NUM_CLASSES,
+        cols=1 + len(FAMILIES),
+        specs=specs,
+        column_widths=[0.32] + [0.17] * len(FAMILIES),
+        horizontal_spacing=0.012,
+        vertical_spacing=0.03,
     )
+    _data_panel(fig, task, design)
+    rng = torch.Generator().manual_seed(0)
     for c in range(NUM_CLASSES):
         mask = np.nonzero(tnb["cls"] == c)[0]
         index = int(mask[np.argmin(np.abs(tnb["w"][mask] - TARGET_W[design][c]))])
@@ -103,7 +122,7 @@ def _figure(out_dir: Path, design: int, seed: int, kind: str, path: Path) -> Non
         axis = task.axis_of(cls)[0].numpy()
         view = _view(axis)
         for column, (family, title) in enumerate(FAMILIES):
-            panel = axes[c, column]
+            row, col = c + 1, column + 2
             if family == "exact":
                 points = task.sample_posterior(x, cls, NUM_POINTS, rng)[:, 0].numpy()
                 note = f"true latitude w = {tnb['w'][index]:.2f}"
@@ -114,30 +133,244 @@ def _figure(out_dir: Path, design: int, seed: int, kind: str, path: Path) -> Non
                     f"TV {data[family]['tv'][index]:.2f}, "
                     f"|cos| {data[family]['abs_cos'][index]:.2f}"
                 )
-            _frame(panel)
-            _scatter(panel, points, view, c)
-            _axis_markers(panel, axis, view)
-            panel.set_xlabel(note, color=INK_SECONDARY, fontsize=9)
+            _sphere_axes(fig, row, col)
+            _outline(fig, row, col)
+            _points(fig, row, col, points, view, c)
+            _axis_markers(fig, row, col, axis[None], view)
+            _note(fig, row, col, note)
             if c == 0:
-                panel.set_title(title, color=INK, fontsize=12)
+                _title(fig, row, col, f"<b>{title}</b>")
             if column == 0:
                 label = "band" if design == 1 else "class"
-                panel.set_ylabel(f"{label} {c + 1}", color=INK, fontsize=12)
+                fig.update_yaxes(title_text=f"<b>{label} {c + 1}</b>", row=row, col=col)
     verdict = {
         "aligned": "aligned, lowest-KL seed",
         "nonaligned": "not aligned",
         "worst": "aligned, highest-KL seed",
     }[kind]
-    fig.suptitle(
-        f"Design {design}: exact posterior vs fitted posteriors, seed {seed} "
-        f"(TNBBeta {verdict}, mean exact KL {summary['kl_mean']:.2f}); "
-        "star = +a, open star = -a, faint = far side",
-        color=INK,
-        fontsize=11,
+    fig.update_layout(
+        template=TEMPLATE_NAME,
+        width=1800,
+        height=1400,
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        margin={"l": 40, "r": 20, "t": 110, "b": 40},
+        title={
+            "text": (
+                f"Design {design}: true data distribution, exact posterior and fitted "
+                f"posteriors, seed {seed}<br><sup>TNBBeta {verdict}, mean exact KL "
+                f"{summary['kl_mean']:.2f}; star = +a, open star = -a, faint = far side"
+                "</sup>"
+            ),
+            "x": 0.5,
+        },
+        legend={
+            "orientation": "v",
+            "x": 0.0,
+            "y": 0.27,
+            "xanchor": "left",
+            "yanchor": "top",
+            "font": {"family": FONT_FAMILY, "size": 13},
+        },
     )
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
-    fig.savefig(path, dpi=130, facecolor=SURFACE)
-    plt.close(fig)
+    fig.write_image(path, scale=1.5)
+
+
+def _data_panel(fig: go.Figure, task: RingClassTask, design: int) -> None:
+    """The leftmost sphere: the true data distribution of ``z``, coloured by class."""
+    generator = torch.Generator().manual_seed(1)
+    _, z, cls, _ = task.sample(NUM_DATA_POINTS, generator)
+    z, cls = z.numpy(), cls.numpy()
+    axes = task.axes(torch.float64).numpy()
+    view = _view(axes[0]) if design == 1 else DATA_VIEW_DESIGN2
+    _sphere_axes(fig, 1, 1)
+    _outline(fig, 1, 1)
+    if design == 1:
+        _band_edges(fig, 1, 1, axes[0], view)
+    for c in range(NUM_CLASSES):
+        name = (
+            f"band {c + 1}: w in [{BAND_EDGES[c]:g}, {BAND_EDGES[c + 1]:g}]"
+            if design == 1
+            else f"class {c + 1} (axis a{c + 1})"
+        )
+        _points(fig, 1, 1, z[cls == c], view, c, name=name, size=MARKER_SIZE + 1)
+    labels = [f"a{c + 1}" for c in range(NUM_CLASSES)] if design == 2 else None
+    _axis_markers(fig, 1, 1, axes if design == 2 else axes[:1], view, labels)
+    heading = (
+        "<b>true data distribution</b><br>z coloured by latitude band"
+        if design == 1
+        else "<b>true data distribution</b><br>z is uniform for every class"
+    )
+    _title(fig, 1, 1, heading)
+
+
+def _axis_ids(fig: go.Figure, row: int, col: int) -> tuple[str, str]:
+    subplot: Any = fig.get_subplot(row, col)
+    xid = subplot.xaxis.plotly_name.replace("axis", "")
+    yid = subplot.yaxis.plotly_name.replace("axis", "")
+    return xid, yid
+
+
+def _sphere_axes(fig: go.Figure, row: int, col: int) -> None:
+    xid, _ = _axis_ids(fig, row, col)
+    common = {
+        "range": [-1.05, 1.05],
+        "showgrid": False,
+        "zeroline": False,
+        "showline": False,
+        "showticklabels": False,
+        "ticks": "",
+        "constrain": "domain",
+        "row": row,
+        "col": col,
+    }
+    fig.update_xaxes(**common)
+    fig.update_yaxes(scaleanchor=xid, scaleratio=1, **common)
+
+
+def _outline(fig: go.Figure, row: int, col: int) -> None:
+    theta = np.linspace(0, 2 * np.pi, 400)
+    fig.add_trace(
+        go.Scatter(
+            x=np.cos(theta),
+            y=np.sin(theta),
+            mode="lines",
+            line={"color": OUTLINE, "width": 1.5},
+            hoverinfo="skip",
+            showlegend=False,
+        ),
+        row=row,
+        col=col,
+    )
+
+
+def _points(
+    fig: go.Figure,
+    row: int,
+    col: int,
+    points: np.ndarray,
+    view: np.ndarray,
+    c: int,
+    name: str | None = None,
+    size: int = MARKER_SIZE,
+) -> None:
+    xy, front = _project(points, view)
+    for mask, opacity, label in ((front, 0.65, name), (~front, 0.12, None)):
+        fig.add_trace(
+            go.Scatter(
+                x=xy[mask, 0],
+                y=xy[mask, 1],
+                mode="markers",
+                marker={
+                    "symbol": SYMBOLS[c],
+                    "size": size,
+                    "color": COLORS[c],
+                    "opacity": opacity,
+                    "line": {"width": 0},
+                },
+                name=label,
+                showlegend=label is not None,
+                hoverinfo="skip",
+            ),
+            row=row,
+            col=col,
+        )
+
+
+def _band_edges(
+    fig: go.Figure, row: int, col: int, axis: np.ndarray, view: np.ndarray
+) -> None:
+    """Thin circles at the design-1 band edges ``w = -0.5, 0, 0.5``."""
+    helper = (
+        np.array([1.0, 0.0, 0.0]) if abs(axis[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+    )
+    e1 = np.cross(axis, helper)
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(axis, e1)
+    phi = np.linspace(0, 2 * np.pi, 300)
+    for w in BAND_EDGES[1:-1]:
+        radius = np.sqrt(1 - w**2)
+        ring = radius * (np.cos(phi)[:, None] * e1 + np.sin(phi)[:, None] * e2)
+        xy, front = _project(ring + w * axis, view)
+        xy = np.where(front[:, None], xy, np.nan)
+        fig.add_trace(
+            go.Scatter(
+                x=xy[:, 0],
+                y=xy[:, 1],
+                mode="lines",
+                line={"color": INK_SECONDARY, "width": 1},
+                hoverinfo="skip",
+                showlegend=False,
+            ),
+            row=row,
+            col=col,
+        )
+
+
+def _axis_markers(
+    fig: go.Figure,
+    row: int,
+    col: int,
+    axes: np.ndarray,
+    view: np.ndarray,
+    labels: list[str] | None = None,
+) -> None:
+    """Stars at ``+axes`` (filled) and ``-axes`` (open); ``labels`` name the filled."""
+    for sign, symbol in ((1.0, "star"), (-1.0, "star-open")):
+        xy, front = _project(sign * axes, view)
+        for mask, opacity in ((front, 1.0), (~front, 0.3)):
+            if not mask.any():
+                continue
+            text = (
+                [labels[i] for i in np.nonzero(mask)[0]]
+                if labels is not None and sign > 0
+                else None
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=xy[mask, 0],
+                    y=xy[mask, 1],
+                    mode="markers+text" if text else "markers",
+                    text=text,
+                    textposition="top right",
+                    textfont={"family": FONT_FAMILY, "size": 14, "color": INK},
+                    marker={
+                        "symbol": symbol,
+                        "size": 15,
+                        "color": INK,
+                        "opacity": opacity,
+                        "line": {"width": 1.5, "color": INK},
+                    },
+                    hoverinfo="skip",
+                    showlegend=False,
+                ),
+                row=row,
+                col=col,
+            )
+
+
+def _annotate(
+    fig: go.Figure, row: int, col: int, text: str, y: float, anchor: str
+) -> None:
+    xid, yid = _axis_ids(fig, row, col)
+    fig.add_annotation(
+        text=text,
+        xref=f"{xid} domain",
+        yref=f"{yid} domain",
+        x=0.5,
+        y=y,
+        showarrow=False,
+        yanchor=anchor,
+        font={"family": FONT_FAMILY, "size": 13, "color": INK},
+    )
+
+
+def _note(fig: go.Figure, row: int, col: int, text: str) -> None:
+    _annotate(fig, row, col, text, -0.02, "top")
+
+
+def _title(fig: go.Figure, row: int, col: int, text: str) -> None:
+    _annotate(fig, row, col, text, 1.02, "bottom")
 
 
 def _fitted_samples(
@@ -179,48 +412,6 @@ def _project(points: np.ndarray, view: np.ndarray) -> tuple[np.ndarray, np.ndarr
     e1 /= np.linalg.norm(e1)
     e2 = np.cross(w, e1)
     return np.stack([points @ e1, points @ e2], axis=-1), points @ w > 0
-
-
-def _frame(panel) -> None:  # noqa: ANN001
-    theta = np.linspace(0, 2 * np.pi, 400)
-    panel.plot(np.cos(theta), np.sin(theta), color=GRID, linewidth=1.2)
-    panel.set_xlim(-1.05, 1.05)
-    panel.set_ylim(-1.05, 1.05)
-    panel.set_aspect("equal")
-    panel.set_xticks([])
-    panel.set_yticks([])
-    panel.set_facecolor(SURFACE)
-    for spine in panel.spines.values():
-        spine.set_visible(False)
-
-
-def _scatter(panel, points: np.ndarray, view: np.ndarray, c: int) -> None:  # noqa: ANN001
-    xy, front = _project(points, view)
-    for mask, alpha in ((front, 0.65), (~front, 0.12)):
-        panel.scatter(
-            xy[mask, 0],
-            xy[mask, 1],
-            s=8,
-            marker=MARKERS[c],
-            color=COLORS[c],
-            alpha=alpha,
-            linewidths=0,
-        )
-
-
-def _axis_markers(panel, axis: np.ndarray, view: np.ndarray) -> None:  # noqa: ANN001
-    for sign, filled in ((1.0, True), (-1.0, False)):
-        xy, front = _project((sign * axis)[None], view)
-        panel.scatter(
-            xy[0, 0],
-            xy[0, 1],
-            s=80,
-            marker="*",
-            facecolors=INK if filled else "none",
-            edgecolors=INK,
-            alpha=1.0 if front[0] else 0.35,
-            zorder=5,
-        )
 
 
 if __name__ == "__main__":
