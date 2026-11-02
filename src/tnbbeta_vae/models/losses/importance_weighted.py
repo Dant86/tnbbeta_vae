@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 import torch
 from torch.distributions import kl_divergence
 
+from tnbbeta_vae.models.losses.sampling import sample_with_log_prob
+
 if TYPE_CHECKING:
     from torch import Tensor
 
@@ -48,9 +50,12 @@ def importance_weighted_metrics(
     remaining = num_samples
     while remaining > 0:
         count = min(chunk_size, remaining)
-        z = posterior.sample(torch.Size([count]))
+        z, log_q = sample_with_log_prob(
+            posterior, torch.Size([count]), reparameterize=False
+        )
+        assert log_q is not None
         log_likelihood = model.log_likelihood(x, z)
-        log_ratio = posterior.log_prob(z) - prior.log_prob(z)
+        log_ratio = log_q - prior.log_prob(z)
         log_likelihoods.append(log_likelihood)
         log_ratios.append(log_ratio)
         log_weights.append(log_likelihood - log_ratio)

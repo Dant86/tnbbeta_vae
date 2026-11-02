@@ -19,7 +19,11 @@ from torch import Tensor, nn
 from tnbbeta_vae.distributions import TNBBetaSpherical
 from tnbbeta_vae.models.architectures.conv import ConvDecoder, ConvEncoder
 from tnbbeta_vae.models.diagnostics import tnbbeta_spherical_posterior_diagnostics
-from tnbbeta_vae.models.heads import tnbbeta_posterior
+from tnbbeta_vae.models.heads import (
+    P_RAW_INIT,
+    init_tnbbeta_p_bias,
+    tnbbeta_posterior,
+)
 from tnbbeta_vae.models.losses.elbo import monte_carlo_elbo, pixel_log_likelihood
 from tnbbeta_vae.models.losses.likelihood import LearnedLikelihoodScale
 from tnbbeta_vae.models.priors.tnbbeta_spherical import (
@@ -74,6 +78,15 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
             expressivity is usable when it's the only channel available.
             ``False`` (default) keeps direction learned, unchanged from
             before this option existed.
+        p_init_offset: Initial value of the raw p bias of the posterior head
+            (``heads.P_RAW_INIT``, p starts at 0.75). An initialisation only; ``0.0``
+            reproduces the previous initialisation exactly.
+        epsilon_floor: For ``family="tnbbeta"`` (and a learned epsilon) only: the
+            smallest epsilon the head can produce, ``epsilon = softplus(raw) +
+            epsilon_floor``. The default ``1e-4`` reproduces every earlier run and
+            checkpoint exactly; changing it shifts a checkpoint's epsilon, so set
+            it only for new runs (0.3 is suggested on tasks that can reach small
+            epsilon, where a posterior at the floor is a pair of point masses).
     """
 
     image_channels: int = 3
@@ -85,6 +98,8 @@ class ConvTNBBetaSphericalVAEConfig(BaseModel):
     num_elbo_samples: int = 1
     fixed_epsilon: float | None = None
     fixed_mean_direction: bool = False
+    p_init_offset: float = P_RAW_INIT
+    epsilon_floor: float = 1e-4
 
 
 @register_model("conv_tnbbeta_spherical_vae", config_cls=ConvTNBBetaSphericalVAEConfig)
@@ -107,6 +122,12 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             2 if config.fixed_epsilon is not None else 3
         )
         self.posterior_head = nn.Linear(self.encoder.out_features, head_size)
+        init_tnbbeta_p_bias(
+            self.posterior_head,
+            config.latent_dim,
+            config.fixed_mean_direction,
+            config.p_init_offset,
+        )
         self.decoder = ConvDecoder(
             config.latent_dim,
             config.image_channels,
@@ -217,6 +238,7 @@ class ConvTNBBetaSphericalVAE(nn.Module):
             self.config.latent_dim,
             fixed_epsilon=self.config.fixed_epsilon,
             fixed_mean_direction=self.config.fixed_mean_direction,
+            epsilon_floor=self.config.epsilon_floor,
         )
 
     def _decode_for_likelihood(self, z: Tensor) -> Tensor:

@@ -26,6 +26,11 @@ Where a closed-form KL *does* exist (e.g. Gaussian vs. Gaussian), pass
 ``analytic_kl=True`` to use ``torch.distributions.kl_divergence`` instead:
 it's exact, deterministic given the distributions, and always >= 0. The
 reconstruction term is still a Monte Carlo average either way.
+
+The Monte Carlo ``log q(z)`` comes from
+:func:`~tnbbeta_vae.models.losses.sampling.sample_with_log_prob`, which is exact
+for ``TNBBetaSpherical`` at small ``epsilon`` (where ``log_prob(rsample())`` is
+not) and otherwise plain ``log_prob``.
 """
 
 from __future__ import annotations
@@ -35,6 +40,8 @@ from typing import TYPE_CHECKING, Literal
 import torch
 from torch.distributions import Normal, kl_divergence
 from torch.nn.functional import binary_cross_entropy_with_logits
+
+from tnbbeta_vae.models.losses.sampling import sample_with_log_prob
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -96,14 +103,16 @@ def monte_carlo_elbo(
     log_likelihoods = []
     kls = []
     for _ in range(num_samples):
-        z = posterior.rsample()
+        z, log_q = sample_with_log_prob(
+            posterior, reparameterize=True, need_log_prob=exact_kl is None
+        )
         reconstruction = decoder(z)
 
         log_likelihoods.append(
             pixel_log_likelihood(x, reconstruction, likelihood, likelihood_scale)
         )
-        if exact_kl is None:
-            kls.append(posterior.log_prob(z) - prior.log_prob(z))
+        if log_q is not None:
+            kls.append(log_q - prior.log_prob(z))
 
     log_likelihood = torch.stack(log_likelihoods).mean(0)
     kl = exact_kl if exact_kl is not None else torch.stack(kls).mean(0)

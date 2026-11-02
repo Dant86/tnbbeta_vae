@@ -15,8 +15,10 @@ from torch.distributions import Distribution
 
 from tnbbeta_vae.models.architectures.mlp import mlp_stack
 from tnbbeta_vae.models.heads import (
+    P_RAW_INIT,
     LatentFamily,
     head_size,
+    init_tnbbeta_p_bias,
     posterior_from_raw,
     standard_prior,
     tnbbeta_posterior,
@@ -46,6 +48,17 @@ class MlpVAEConfig(BaseModel):
             ``family="tnbbeta"``; ignored (not an error) for the other families,
             mirroring ``ConvTNBBetaSphericalVAEConfig.fixed_epsilon``. ``None``
             (default) keeps epsilon learned.
+        p_init_offset: For ``family="tnbbeta"`` only: initial value of the raw p bias
+            of the posterior head (``heads.P_RAW_INIT`` = ln 3, so p starts at 0.75).
+            An initialisation only, with no change to the parameters' names or shapes
+            or to the posterior map. ``0.0`` reproduces the previous initialisation
+            exactly.
+        epsilon_floor: For ``family="tnbbeta"`` (and a learned epsilon) only: the
+            smallest epsilon the head can produce, ``epsilon = softplus(raw) +
+            epsilon_floor``. The default ``1e-4`` reproduces every earlier run and
+            checkpoint exactly; changing it shifts a checkpoint's epsilon, so set
+            it only for new runs (0.3 is suggested on tasks that can reach small
+            epsilon, where a posterior at the floor is a pair of point masses).
     """
 
     family: LatentFamily = "tnbbeta"
@@ -55,6 +68,8 @@ class MlpVAEConfig(BaseModel):
     likelihood_scale: float = 0.1
     num_elbo_samples: int = 1
     fixed_epsilon: float | None = None
+    p_init_offset: float = P_RAW_INIT
+    epsilon_floor: float = 1e-4
 
 
 @register_model("mlp_vae", config_cls=MlpVAEConfig)
@@ -74,6 +89,10 @@ class MlpVAE(nn.Module):
         if config.family == "tnbbeta" and config.fixed_epsilon is not None:
             posterior_head_size -= 1
         self.posterior_head = nn.Linear(config.hidden_dims[-1], posterior_head_size)
+        if config.family == "tnbbeta":
+            init_tnbbeta_p_bias(
+                self.posterior_head, config.latent_dim, offset=config.p_init_offset
+            )
         self.decoder = nn.Sequential(
             mlp_stack([config.latent_dim, *reversed(config.hidden_dims)]),
             nn.Linear(config.hidden_dims[0], config.input_dim),
@@ -156,7 +175,10 @@ class MlpVAE(nn.Module):
         raw = self.posterior_head(self.encoder(x))
         if self.config.family == "tnbbeta":
             return tnbbeta_posterior(
-                raw, self.config.latent_dim, fixed_epsilon=self.config.fixed_epsilon
+                raw,
+                self.config.latent_dim,
+                fixed_epsilon=self.config.fixed_epsilon,
+                epsilon_floor=self.config.epsilon_floor,
             )
         return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
 

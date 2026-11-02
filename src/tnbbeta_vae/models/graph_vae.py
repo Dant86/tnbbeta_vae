@@ -17,12 +17,13 @@ from pydantic import BaseModel
 import torch
 from torch import Tensor, nn
 from torch.distributions import Distribution
-from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.nn.functional import binary_cross_entropy_with_logits, linear
 
 from tnbbeta_vae.models.heads import (
     LatentFamily,
     fixed_kappa_posterior,
     head_size,
+    init_tnbbeta_p_bias,
     posterior_centre,
     posterior_from_raw,
     power_spherical_kappa_inverse,
@@ -30,6 +31,7 @@ from tnbbeta_vae.models.heads import (
     tnbbeta_posterior,
     vmf_kappa_inverse,
 )
+from tnbbeta_vae.models.losses.sampling import sample_and_kl
 from tnbbeta_vae.models.pairwise import pairwise_logits
 from tnbbeta_vae.registry import register_model
 
@@ -113,6 +115,23 @@ class GraphVAEConfig(BaseModel):
             existing checkpoints still load. Needed when the true edge probability
             has a base rate below one half that an inner product alone cannot reach
             (``data.structured_graph.latent_sphere_graph``).
+        head_bias: If ``True``, the posterior head ``second`` has a learned bias (one
+            per raw output), added *after* the adjacency aggregation so each raw
+            parameter's baseline is a free offset independent of the (small) hidden
+            activations. Off by default (the GCN linears are bias-free, as in the VGAE),
+            and the ``second.bias`` parameter exists only when on, so existing
+            checkpoints still load strictly.
+        p_init_offset: With ``head_bias=True`` and ``family="tnbbeta"``: initial value
+            of the raw-p bias (see ``heads.init_tnbbeta_p_bias``; ``heads.P_RAW_INIT``
+            = ln 3 is the repo's convention elsewhere). ``0.0`` (default) leaves the
+            bias at ``nn.Linear``'s random initialisation. Ignored without
+            ``head_bias`` or for other families.
+        epsilon_floor: For ``family="tnbbeta"`` (and a learned epsilon) only: the
+            smallest epsilon the head can produce, ``epsilon = softplus(raw) +
+            epsilon_floor``. The default ``1e-4`` reproduces every earlier run and
+            checkpoint exactly; changing it shifts a checkpoint's epsilon, so set
+            it only for new runs (0.3 is suggested on tasks that can reach small
+            epsilon, where a posterior at the floor is a pair of point masses).
     """
 
     family: LatentFamily = "tnbbeta"
@@ -126,6 +145,9 @@ class GraphVAEConfig(BaseModel):
     fixed_kappa: float | None = None
     initial_kappa: float | None = None
     decoder_bias: bool = False
+    head_bias: bool = False
+    p_init_offset: float = 0.0
+    epsilon_floor: float = 1e-4
 
 
 @register_model("graph_vae", config_cls=GraphVAEConfig)
@@ -159,7 +181,13 @@ class GraphVAE(nn.Module):
                     f"got {config.family!r}."
                 )
             posterior_head_size -= 1
-        self.second = nn.Linear(config.hidden_dim, posterior_head_size, bias=False)
+        self.second = nn.Linear(
+            config.hidden_dim, posterior_head_size, bias=config.head_bias
+        )
+        if config.head_bias and config.family == "tnbbeta":
+            init_tnbbeta_p_bias(
+                self.second, config.latent_dim, offset=config.p_init_offset
+            )
         self.dropout = nn.Dropout(config.dropout)
         self.log_temperature = nn.Parameter(
             torch.tensor(math.log(_INITIAL_TEMPERATURE)),
@@ -192,7 +220,7 @@ class GraphVAE(nn.Module):
             reconstruction cross-entropy, detached) when the feature decoder exists.
         """
         posterior, prior = self.posterior_and_prior(batch)
-        z = posterior.rsample()
+        z, kl = sample_and_kl(posterior, prior)
         positives = batch.positive_edges
         negatives = self._sample_negatives(batch)
         logits = self.link_logits(z, torch.cat([positives, negatives], dim=1))
@@ -200,10 +228,6 @@ class GraphVAE(nn.Module):
             [torch.ones(positives.shape[1]), torch.zeros(negatives.shape[1])]
         ).to(logits.device)
         link_loss = binary_cross_entropy_with_logits(logits, targets)
-        try:
-            kl = torch.distributions.kl_divergence(posterior, prior)
-        except NotImplementedError:
-            kl = posterior.log_prob(z) - prior.log_prob(z)
         kl_mean = kl.mean()
         loss = link_loss + kl_weight * kl_mean / batch.num_nodes
         result = {
@@ -251,7 +275,12 @@ class GraphVAE(nn.Module):
                     batch.norm_adjacency, self.first(self.dropout(batch.features))
                 )
             )
-        raw = torch.sparse.mm(batch.norm_adjacency, self.second(self.dropout(hidden)))
+        raw = torch.sparse.mm(
+            batch.norm_adjacency,
+            linear(self.dropout(hidden), self.second.weight),
+        )
+        if self.second.bias is not None:
+            raw = raw + self.second.bias
         return self._posterior(raw), self._prior(raw)
 
     def link_logits(self, z: Tensor, edges: Tensor) -> Tensor:
@@ -294,7 +323,10 @@ class GraphVAE(nn.Module):
     def _posterior(self, raw: Tensor) -> Distribution:
         if self.config.family == "tnbbeta":
             return tnbbeta_posterior(
-                raw, self.config.latent_dim, fixed_epsilon=self.config.fixed_epsilon
+                raw,
+                self.config.latent_dim,
+                fixed_epsilon=self.config.fixed_epsilon,
+                epsilon_floor=self.config.epsilon_floor,
             )
         if self.config.fixed_kappa is not None:
             return fixed_kappa_posterior(
