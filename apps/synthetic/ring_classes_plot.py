@@ -6,9 +6,10 @@ class, with the class axes marked. Each row is one class (design 1: latitude ban
 design 2: class); its panels show one representative test ``x`` (the test ``x`` of that
 class whose true latitude is nearest a fixed target): the exact posterior, then the
 vMF, PowerSpherical and TNBBeta posteriors fitted by the same seed, on an orthographic
-view of ``S^2`` with the class axis marked (star: ``+a``; open star: ``-a``; the far
-side is drawn faintly). Rendered with plotly and the project's ``alptex`` template
-(``tnbbeta_vae.plotting``) through kaleido.
+view of ``S^2`` with the class axis ``+a`` drawn as an arrow from the origin (lighter
+when it points away from the viewer; the far side of the sphere is drawn faintly).
+Rendered with plotly and the project's ``alptex`` template (``tnbbeta_vae.plotting``)
+through kaleido.
 
 Usage:
     uv run python -m apps.synthetic.ring_classes_plot \
@@ -43,7 +44,7 @@ INK_SECONDARY = "#555555"
 OUTLINE = "#c8c8c8"
 TARGET_W = {1: (-0.75, -0.25, 0.25, 0.75), 2: (-0.6, -0.2, 0.2, 0.6)}
 FAMILIES = (
-    ("exact", "exact posterior"),
+    ("exact", "Exact Posterior"),
     ("vmf", "vMF"),
     ("power_spherical", "PowerSpherical"),
     ("tnbbeta", "TNBBeta"),
@@ -98,19 +99,16 @@ def _figure(out_dir: Path, design: int, seed: int, kind: str, path: Path) -> Non
         for arm in ("vmf", "power_spherical", "tnbbeta")
     }
     tnb = data["tnbbeta"]
-    summary = json.loads(
-        (out_dir / f"design{design}" / "tnbbeta" / f"s{seed}.json").read_text()
-    )
-    specs = [[{"rowspan": NUM_CLASSES}, {}, {}, {}, {}]] + [
-        [None, {}, {}, {}, {}] for _ in range(NUM_CLASSES - 1)
+    specs = [[{"rowspan": NUM_CLASSES}, None, {}, {}, {}, {}]] + [
+        [None, None, {}, {}, {}, {}] for _ in range(NUM_CLASSES - 1)
     ]
     fig = make_subplots(
         rows=NUM_CLASSES,
-        cols=1 + len(FAMILIES),
+        cols=2 + len(FAMILIES),
         specs=specs,
-        column_widths=[0.32] + [0.17] * len(FAMILIES),
-        horizontal_spacing=0.012,
-        vertical_spacing=0.03,
+        column_widths=[0.29, 0.08] + [0.157] * len(FAMILIES),
+        horizontal_spacing=0.004,
+        vertical_spacing=0.025,
     )
     _data_panel(fig, task, design)
     rng = torch.Generator().manual_seed(0)
@@ -121,28 +119,21 @@ def _figure(out_dir: Path, design: int, seed: int, kind: str, path: Path) -> Non
         cls = torch.tensor([c])
         axis = task.axis_of(cls)[0].numpy()
         view = _view(axis)
+        axis_label = "a" if design == 1 else f"a{c + 1}"
         for column, (family, title) in enumerate(FAMILIES):
-            row, col = c + 1, column + 2
+            row, col = c + 1, column + 3
             if family == "exact":
                 points = task.sample_posterior(x, cls, NUM_POINTS, rng)[:, 0].numpy()
-                note = f"true latitude w = {tnb['w'][index]:.2f}"
             else:
                 points = _fitted_samples(family, data[family], index, rng)
-                note = (
-                    f"KL {data[family]['kl'][index]:.2f}, "
-                    f"TV {data[family]['tv'][index]:.2f}, "
-                    f"|cos| {data[family]['abs_cos'][index]:.2f}"
-                )
             _sphere_axes(fig, row, col)
             _outline(fig, row, col)
             _points(fig, row, col, points, view, c)
-            _axis_markers(fig, row, col, axis[None], view)
-            _note(fig, row, col, note)
+            _axis_arrows(fig, row, col, axis[None], view, [axis_label])
             if c == 0:
                 _title(fig, row, col, f"<b>{title}</b>")
             if column == 0:
-                label = "band" if design == 1 else "class"
-                fig.update_yaxes(title_text=f"<b>{label} {c + 1}</b>", row=row, col=col)
+                fig.update_yaxes(title_text=f"<b>Class {c + 1}</b>", row=row, col=col)
     verdict = {
         "aligned": "aligned, lowest-KL seed",
         "nonaligned": "not aligned",
@@ -154,26 +145,25 @@ def _figure(out_dir: Path, design: int, seed: int, kind: str, path: Path) -> Non
         height=1400,
         paper_bgcolor="white",
         plot_bgcolor="white",
-        margin={"l": 40, "r": 20, "t": 110, "b": 40},
+        margin={"l": 40, "r": 20, "t": 110, "b": 100},
         title={
             "text": (
-                f"Design {design}: true data distribution, exact posterior and fitted "
-                f"posteriors, seed {seed}<br><sup>TNBBeta {verdict}, mean exact KL "
-                f"{summary['kl_mean']:.2f}; star = +a, open star = -a, faint = far side"
-                "</sup>"
+                "Synthetic Experiment: True v/s Estimated Posteriors"
+                f"<br><sup>Design {design}, seed {seed} (TNBBeta {verdict}); "
+                "arrow = class axis a from the origin; faint = far side</sup>"
             ),
             "x": 0.5,
         },
         legend={
-            "orientation": "v",
-            "x": 0.0,
-            "y": 0.27,
-            "xanchor": "left",
+            "orientation": "h",
+            "x": 0.5,
+            "y": -0.012,
+            "xanchor": "center",
             "yanchor": "top",
-            "font": {"family": FONT_FAMILY, "size": 13},
+            "font": {"family": FONT_FAMILY, "size": 15},
         },
     )
-    fig.write_image(path, scale=1.5)
+    fig.write_image(path, scale=3)
 
 
 def _data_panel(fig: go.Figure, task: RingClassTask, design: int) -> None:
@@ -189,17 +179,17 @@ def _data_panel(fig: go.Figure, task: RingClassTask, design: int) -> None:
         _band_edges(fig, 1, 1, axes[0], view)
     for c in range(NUM_CLASSES):
         name = (
-            f"band {c + 1}: w in [{BAND_EDGES[c]:g}, {BAND_EDGES[c + 1]:g}]"
+            f"Class {c + 1} (w in [{BAND_EDGES[c]:g}, {BAND_EDGES[c + 1]:g}])"
             if design == 1
-            else f"class {c + 1} (axis a{c + 1})"
+            else f"Class {c + 1} (axis a{c + 1})"
         )
         _points(fig, 1, 1, z[cls == c], view, c, name=name, size=MARKER_SIZE + 1)
-    labels = [f"a{c + 1}" for c in range(NUM_CLASSES)] if design == 2 else None
-    _axis_markers(fig, 1, 1, axes if design == 2 else axes[:1], view, labels)
+    labels = [f"a{c + 1}" for c in range(NUM_CLASSES)] if design == 2 else ["a"]
+    _axis_arrows(fig, 1, 1, axes if design == 2 else axes[:1], view, labels)
     heading = (
-        "<b>true data distribution</b><br>z coloured by latitude band"
+        "<b>True Data Distribution</b><br>z coloured by class (latitude band)"
         if design == 1
-        else "<b>true data distribution</b><br>z is uniform for every class"
+        else "<b>True Data Distribution</b><br>z is uniform for every class"
     )
     _title(fig, 1, 1, heading)
 
@@ -307,46 +297,50 @@ def _band_edges(
         )
 
 
-def _axis_markers(
+def _axis_arrows(
     fig: go.Figure,
     row: int,
     col: int,
     axes: np.ndarray,
     view: np.ndarray,
-    labels: list[str] | None = None,
+    labels: list[str],
 ) -> None:
-    """Stars at ``+axes`` (filled) and ``-axes`` (open); ``labels`` name the filled."""
-    for sign, symbol in ((1.0, "star"), (-1.0, "star-open")):
-        xy, front = _project(sign * axes, view)
-        for mask, opacity in ((front, 1.0), (~front, 0.3)):
-            if not mask.any():
-                continue
-            text = (
-                [labels[i] for i in np.nonzero(mask)[0]]
-                if labels is not None and sign > 0
-                else None
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=xy[mask, 0],
-                    y=xy[mask, 1],
-                    mode="markers+text" if text else "markers",
-                    text=text,
-                    textposition="top right",
-                    textfont={"family": FONT_FAMILY, "size": 14, "color": INK},
-                    marker={
-                        "symbol": symbol,
-                        "size": 15,
-                        "color": INK,
-                        "opacity": opacity,
-                        "line": {"width": 1.5, "color": INK},
-                    },
-                    hoverinfo="skip",
-                    showlegend=False,
-                ),
-                row=row,
-                col=col,
-            )
+    """Arrows from the sphere's centre to the projected ``+a`` of each class axis.
+
+    An axis on the far side of the sphere is drawn lighter.
+    """
+    xid, yid = _axis_ids(fig, row, col)
+    xy, front = _project(axes, view)
+    for i, (tip, is_front) in enumerate(zip(xy, front, strict=True)):
+        colour = INK if is_front else "rgba(26,26,26,0.35)"
+        fig.add_annotation(
+            x=float(tip[0]),
+            y=float(tip[1]),
+            ax=0.0,
+            ay=0.0,
+            xref=xid,
+            yref=yid,
+            axref=xid,
+            ayref=yid,
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1.1,
+            arrowwidth=2.5,
+            arrowcolor=colour,
+            text="",
+        )
+        fig.add_annotation(
+            x=float(tip[0]),
+            y=float(tip[1]),
+            xref=xid,
+            yref=yid,
+            text=f"<i>{labels[i]}</i>",
+            showarrow=False,
+            xanchor="left",
+            yanchor="bottom",
+            xshift=5,
+            font={"family": FONT_FAMILY, "size": 15, "color": colour},
+        )
 
 
 def _annotate(
@@ -363,10 +357,6 @@ def _annotate(
         yanchor=anchor,
         font={"family": FONT_FAMILY, "size": 13, "color": INK},
     )
-
-
-def _note(fig: go.Figure, row: int, col: int, text: str) -> None:
-    _annotate(fig, row, col, text, -0.02, "top")
 
 
 def _title(fig: go.Figure, row: int, col: int, text: str) -> None:
