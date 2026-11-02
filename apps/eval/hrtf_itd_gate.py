@@ -174,7 +174,10 @@ def _sanity(subjects: list[dict[str, Any]]) -> dict[str, Any]:
     right = np.concatenate([s["direction"][:, 1] < -0.95 for s in subjects])
     return {
         "subjects": len(subjects),
-        "directions_per_subject": len(subjects[0]["itd"]),
+        "directions_per_subject_min_max": [
+            min(len(s["itd"]) for s in subjects),
+            max(len(s["itd"]) for s in subjects),
+        ],
         "left_receiver_first": [s["left_first"] for s in subjects].count(True),
         "itd_us_min_median_max": [
             round(float(v), 1) for v in (itd.min(), np.median(itd), itd.max())

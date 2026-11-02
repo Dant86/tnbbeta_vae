@@ -15,7 +15,7 @@ Commands (login node, light; `h5py` is not a project dependency):
 SADIE II (Zenodo record 10886409, Apache-2.0; cite DOI 10.3390/app8112029). The 18 human subjects
 H3-H20, `H<k>_HRIR_SOFA.zip`, md5-verified against Zenodo, extracted to
 `$TNBBETA_DATA_DIR/hrtf/sadie2/H<k>/`. Used: the 96 kHz, 512-tap files (SimpleFreeFieldHRIR),
-2818 directions per subject at 1.2 m, az 0-355, el -90..90. File header: "Filters were low
+2818 directions for H3-H9 and 2114 for H10-H20 at 1.2 m (the first version of this note and of the script's printout said 2818 for every subject: they read only the first subject; corrected after the HRTF study found it; the gate's numbers use each subject's own directions and weights and are unaffected), az 0-355, el -90..90. File header: "Filters were low
 frequency extended, diffuse field equalized and windowed ... (approx.) Linear phase HRIRs."
 
 Direction `z` = head-frame unit vector (x front, y left, z up) from azimuth/elevation; ring axis

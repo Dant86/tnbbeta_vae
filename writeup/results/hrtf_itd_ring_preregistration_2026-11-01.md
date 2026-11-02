@@ -131,3 +131,5 @@ above is changed; each item is a choice the text left open or a fact found in th
 6. **Arm L has no decoder**, so its alignment is `|cos(mu, +/- y)|` only; the label-based latitude
    check (descriptive) is run for arm V as specified, and for arm L it is reported in the head frame
    with `a = +y` (no sign choice needed).
+7. **Run counts and extras**: both estimators were run for all 160 cells; results and the arm V
+   collapse finding are in `hrtf_itd_ring_results_2026-11-01.md`. Nothing above was changed after seeing results.
