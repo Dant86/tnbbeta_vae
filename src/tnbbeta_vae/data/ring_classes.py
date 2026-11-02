@@ -43,9 +43,13 @@ if TYPE_CHECKING:
 __all__ = [
     "BAND_EDGES",
     "NUM_CLASSES",
+    "OFFSET_DIRECTIONS",
+    "OffsetRingClassTask",
     "RingClassTask",
     "TETRAHEDRON",
+    "class_identifiability",
     "exact_class_kl",
+    "offset_ring_class_task",
     "ring_class_task",
 ]
 
@@ -61,6 +65,13 @@ TETRAHEDRON = (
     (-1.0, -1.0, 1.0),
 )
 _DEFAULT_GRID = 4001
+BASE_OFFSET = 1.5
+OFFSET_DIRECTIONS = (
+    (1.0, 0.0, 0.0),
+    (0.0, 1.0, 0.0),
+    (0.0, 0.0, 1.0),
+    (-1.0, -1.0, -1.0),
+)
 
 
 @dataclass(frozen=True)
@@ -365,6 +376,118 @@ def exact_class_kl(
     mean = total / num_samples
     variance = (total_sq / num_samples - mean.pow(2)).clamp_min(0)
     return mean, (variance / num_samples).sqrt()
+
+
+@dataclass(frozen=True)
+class OffsetRingClassTask:
+    """Design 2': design 2 plus class offsets, ``x = h(a_c . z) + o_c + sigma * eps``.
+
+    The offsets ``o_c = scale * 1.5 * [e_1, e_2, e_3, -(1, 1, 1)]`` make the class
+    identifiable from ``x``. ``z ~ Uniform(S^2)`` is independent of the class ``c ~
+    Uniform{0..3}``, so ``p(x | c)`` is the design-2 evidence of ``x - o_c`` (a 1-D
+    quadrature, ``>= 4001`` nodes), ``p(x) = (1/4) sum_c p(x | c)``, and the class
+    posterior is the softmax of ``log p(x | c)``. Design 1 and the original design 2
+    (:class:`RingClassTask`) are untouched.
+
+    Attributes:
+        offset_scale: Multiplier on the nominal offsets (``1`` is ``1.5 * [...]``).
+        sigma: Observation noise standard deviation.
+        grid_size: Number of midpoint-rule nodes over the polar angle.
+    """
+
+    offset_scale: float = 1.0
+    sigma: float = SIGMA
+    grid_size: int = _DEFAULT_GRID
+
+    @property
+    def base(self) -> RingClassTask:
+        """The offset-free design-2 task this one shifts."""
+        return RingClassTask(2, self.sigma, self.grid_size)
+
+    @property
+    def input_dim(self) -> int:
+        """Class-given encoder input size: ``x`` plus the one-hot class."""
+        return NUM_FEATURES + NUM_CLASSES
+
+    def offsets(self, dtype: torch.dtype = torch.float64) -> Tensor:
+        """The class offsets ``o_c``, shape ``(4, 3)``."""
+        directions = torch.tensor(OFFSET_DIRECTIONS, dtype=dtype)
+        return BASE_OFFSET * self.offset_scale * directions
+
+    def decode(self, z: Tensor, cls: Tensor) -> Tensor:
+        """The true decoder mean ``h(a_c . z) + o_c``; ``z`` is ``(..., batch, 3)``."""
+        return self.base.decode(z, cls) + self.offsets(z.dtype).to(z.device)[cls]
+
+    def sample(
+        self,
+        num: int,
+        generator: torch.Generator | None = None,
+        balanced: bool = False,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Draws ``(x, z, cls, w)`` like :meth:`RingClassTask.sample`, plus offsets."""
+        x, z, cls, w = self.base.sample(num, generator, balanced)
+        return x + self.offsets(x.dtype)[cls], z, cls, w
+
+    def log_evidence_given_class(self, x: Tensor, cls: Tensor) -> Tensor:
+        """Exact ``log p(x | c)`` for each row's class, shape ``(batch,)``."""
+        return self.log_evidence_by_class(x).gather(1, cls[:, None])[:, 0]
+
+    def log_evidence_by_class(self, x: Tensor) -> Tensor:
+        """Exact ``log p(x | c)`` for every class, shape ``(batch, 4)``."""
+        offsets = self.offsets(x.dtype)
+        base = self.base
+        return torch.stack(
+            [base.log_evidence(x - offsets[c]) for c in range(NUM_CLASSES)], dim=-1
+        )
+
+    def log_evidence(self, x: Tensor) -> Tensor:
+        """Exact mixture ``log p(x) = log((1/4) sum_c p(x | c))``, ``(batch,)``."""
+        by_class = self.log_evidence_by_class(x)
+        return torch.logsumexp(by_class, dim=-1) - math.log(NUM_CLASSES)
+
+    def class_posterior(self, x: Tensor) -> Tensor:
+        """The exact class posterior ``p(c | x)``, shape ``(batch, 4)``."""
+        return torch.softmax(self.log_evidence_by_class(x), dim=-1)
+
+
+def offset_ring_class_task(
+    offset_scale: float = 1.0, grid_size: int = _DEFAULT_GRID
+) -> OffsetRingClassTask:
+    """Builds design 2' with sigma 0.2 and the offsets scaled by ``offset_scale``."""
+    return OffsetRingClassTask(offset_scale, SIGMA, grid_size)
+
+
+@torch.no_grad()
+def class_identifiability(
+    task: OffsetRingClassTask,
+    num: int = 20_000,
+    seed: int = 7,
+    threshold: float = 0.99,
+    chunk: int = 1000,
+) -> tuple[float, float]:
+    """The pre-registered check that ``p(c | x) > threshold`` for most test ``x``.
+
+    Args:
+        task: Design 2'.
+        num: Number of test ``x`` (a fresh generator, class random).
+        seed: Generator seed of the check's draw.
+        threshold: Class-posterior level.
+        chunk: Observations per quadrature pass.
+
+    Returns:
+        ``(fraction, mean_max_posterior)``: the fraction of ``x`` whose largest class
+        posterior exceeds ``threshold``, and the mean largest class posterior.
+    """
+    generator = torch.Generator().manual_seed(seed)
+    x, _, _, _ = task.sample(num, generator)
+    x = x.double()
+    top = torch.cat(
+        [
+            task.class_posterior(x[i : i + chunk]).max(-1).values
+            for i in range(0, num, chunk)
+        ]
+    )
+    return float((top > threshold).double().mean()), float(top.mean())
 
 
 def _orthonormal_frame(axis: Tensor) -> tuple[Tensor, Tensor]:
