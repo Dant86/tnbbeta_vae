@@ -1,6 +1,7 @@
 # ITD-only HRTF task (design 1 on real data): pre-registration DRAFT
 
-Date: 2026-11-01. STATUS: DRAFT, not yet frozen. Nothing has been downloaded or run. Items
+Date: 2026-11-01. STATUS: SUPERSEDED by `hrtf_itd_ring_preregistration_2026-11-01.md` (frozen). Kept for the record.
+Original status line: DRAFT, not yet frozen. Nothing had been downloaded or run. Items
 marked [OPEN] are decided after the four-class study
 (`ring_class_designs_preregistration_2026-11-01.md`) reports, or after the data are in hand and
 the feasibility gate below has been computed. Once frozen, this note changes only by an appended
