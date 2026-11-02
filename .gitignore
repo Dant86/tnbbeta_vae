@@ -120,3 +120,6 @@ writeup/**/*.ind
 /slurm_logs/
 /cluster_runs/
 /dblp-results/**
+# Generated ring-study run outputs and stray cluster logs (kept local)
+ring_recovery/
+/slurm-*.out
