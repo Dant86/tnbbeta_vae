@@ -75,10 +75,11 @@ SEED_BASE = {
     "kappa_grid": 30_000_000,
     "axis_diagnostic": 40_000_000,
     "fresh": 50_000_000,
+    "density": 60_000_000,
 }
 # Stages whose runs also compute ``tnbbeta_vae.models.search_metrics`` and keep a
 # checkpoint (the metric-first study); all other stages are unchanged.
-EXTENDED_STAGES = ("fresh",)
+EXTENDED_STAGES = ("fresh", "density")
 # Fixed-kappa grid of the ``kappa_grid`` stage (diffuse to tight; ``DIM`` is the pin).
 KAPPA_GRID = (4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
 # Conditions and the model each trains. ``_init`` starts kappa at ``DIM`` and trains it
