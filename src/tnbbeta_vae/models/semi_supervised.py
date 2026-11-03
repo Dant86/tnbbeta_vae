@@ -29,13 +29,16 @@ from torch import Tensor, nn
 from torch.nn.functional import binary_cross_entropy_with_logits, cross_entropy, one_hot
 
 from tnbbeta_vae.models.heads import (
+    P_RAW_INIT,
     LatentFamily,
     head_size,
+    init_tnbbeta_p_bias,
     posterior_centre,
     posterior_from_raw,
     standard_prior,
     vmf_kappa_inverse,
 )
+from tnbbeta_vae.models.losses.sampling import sample_with_log_prob
 from tnbbeta_vae.registry import register_model
 
 __all__ = ["M1M2Config", "M1M2VAE", "SemiBatch"]
@@ -87,6 +90,15 @@ class M1M2Config(BaseModel):
             at kappa equal to its latent dimension. The reference start is too noisy
             at high dimension and collapses the model (see
             ``ConvVonMisesFisherVAEConfig``).
+        p_init_offset: Initial raw p bias of every TNBBeta head (``heads.P_RAW_INIT``;
+            ``0.0`` reproduces the previous initialisation exactly). No effect on
+            other families, parameter names or shapes.
+        epsilon_floor: For ``family="tnbbeta"`` only: the
+            smallest epsilon the head can produce, ``epsilon = softplus(raw) +
+            epsilon_floor``. The default ``1e-4`` reproduces every earlier run and
+            checkpoint exactly; changing it shifts a checkpoint's epsilon, so set
+            it only for new runs (0.3 is suggested on tasks that can reach small
+            epsilon, where a posterior at the floor is a pair of point masses).
     """
 
     z1_family: LatentFamily = "vmf"
@@ -99,6 +111,8 @@ class M1M2Config(BaseModel):
     alpha: float = 0.5
     num_examples: int = 50_000
     kappa_init: Literal["reference", "dimension"] = "reference"
+    p_init_offset: float = P_RAW_INIT
+    epsilon_floor: float = 1e-4
 
 
 @register_model("m1m2_vae", config_cls=M1M2Config)
@@ -127,6 +141,7 @@ class M1M2VAE(nn.Module):
         )
         if config.kappa_init == "dimension":
             self._start_kappas_at_dimension()
+        self._start_tnbbeta_p(config.p_init_offset)
 
     def training_step(
         self, batch: SemiBatch, kl_weight: float = 1.0
@@ -186,10 +201,25 @@ class M1M2VAE(nn.Module):
             Integer classes, shape ``(batch,)``.
         """
         posterior = posterior_from_raw(
-            self.config.z1_family, self.encoder1(x), self.config.z1_dim
+            self.config.z1_family,
+            self.encoder1(x),
+            self.config.z1_dim,
+            epsilon_floor=self.config.epsilon_floor,
         )
         centre = posterior_centre(self.config.z1_family, posterior)
         return self.classifier(centre).argmax(-1)
+
+    def _start_tnbbeta_p(self, offset: float) -> None:
+        """Sets every TNBBeta head's raw p bias to ``offset`` (``0.0``: no change)."""
+        heads = [
+            (self.config.z1_family, self.encoder1, self.config.z1_dim),
+            (self.config.z2_family, self.encoder2, self.config.z2_dim),
+            (self.config.z1_family, self.decoder2, self.config.z1_dim),
+        ]
+        for family, network, dimension in heads:
+            if family == "tnbbeta":
+                last: Any = network[-1]
+                init_tnbbeta_p_bias(last, dimension, offset=offset)
 
     def _start_kappas_at_dimension(self) -> None:
         """Sets every vMF head's kappa bias so it starts at its latent dimension."""
@@ -207,13 +237,17 @@ class M1M2VAE(nn.Module):
     def _sample_z1(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Samples ``z1 ~ q(z1|x)``; returns it and ``A = log p(x|z1) - log q``."""
         posterior = posterior_from_raw(
-            self.config.z1_family, self.encoder1(x), self.config.z1_dim
+            self.config.z1_family,
+            self.encoder1(x),
+            self.config.z1_dim,
+            epsilon_floor=self.config.epsilon_floor,
         )
-        z1 = posterior.rsample()
+        z1, log_q = sample_with_log_prob(posterior)
+        assert log_q is not None
         log_likelihood = -binary_cross_entropy_with_logits(
             self.decoder1(z1), x, reduction="none"
         ).sum(-1)
-        return z1, log_likelihood - posterior.log_prob(z1)
+        return z1, log_likelihood - log_q
 
     def _z2_terms(self, z1: Tensor, y: Tensor) -> Tensor:
         """Returns one-sample ``B_y`` per row; ``y`` is one-hot, aligned with ``z1``."""
@@ -221,18 +255,21 @@ class M1M2VAE(nn.Module):
             self.config.z2_family,
             self.encoder2(torch.cat([z1, y], dim=-1)),
             self.config.z2_dim,
+            epsilon_floor=self.config.epsilon_floor,
         )
-        z2 = q2.rsample()
+        z2, log_q2 = sample_with_log_prob(q2)
+        assert log_q2 is not None
         p1 = posterior_from_raw(
             self.config.z1_family,
             self.decoder2(torch.cat([z2, y], dim=-1)),
             self.config.z1_dim,
+            epsilon_floor=self.config.epsilon_floor,
         )
         prior2 = standard_prior(self.config.z2_family, self.config.z2_dim, z1.device)
         return (
             p1.log_prob(z1)
             + prior2.log_prob(z2)
-            - q2.log_prob(z2)
+            - log_q2
             - math.log(self.config.num_classes)
         )
 

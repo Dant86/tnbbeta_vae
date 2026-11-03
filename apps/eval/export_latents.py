@@ -39,6 +39,7 @@ from torch.distributions import Independent, Normal, kl_divergence
 from torch.utils.data import DataLoader
 
 from tnbbeta_vae.data.cifar10 import load_cifar10
+from tnbbeta_vae.models.losses.sampling import sample_with_log_prob
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import load_model_checkpoint
 
@@ -113,8 +114,11 @@ def _encode_batch(
         }
     posterior = model._encode(batch)
     prior = model.prior()
-    z = posterior.sample((_KL_SAMPLES,))
-    kl = (posterior.log_prob(z) - prior.log_prob(z)).mean(dim=0)
+    z, log_q = sample_with_log_prob(
+        posterior, torch.Size([_KL_SAMPLES]), reparameterize=False
+    )
+    assert log_q is not None
+    kl = (log_q - prior.log_prob(z)).mean(dim=0)
     direction = posterior.mean_direction
     return {
         "direction": direction,

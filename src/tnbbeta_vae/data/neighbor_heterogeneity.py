@@ -29,7 +29,11 @@ from typing import Any
 import numpy as np
 import numpy.typing as npt
 
-__all__ = ["labels_to_communities", "neighbor_heterogeneity"]
+__all__ = [
+    "labels_to_communities",
+    "neighbor_community_count",
+    "neighbor_heterogeneity",
+]
 
 
 def neighbor_heterogeneity(
@@ -84,6 +88,36 @@ def neighbor_heterogeneity(
         heterogeneity[node] = float(-np.sum(probabilities * np.log(probabilities)))
 
     return heterogeneity
+
+
+def neighbor_community_count(
+    adjacency: Any, communities: dict[int, set[int]]
+) -> npt.NDArray[np.int64]:
+    """Counts the distinct communities among each node's neighbors.
+
+    The unweighted sibling of :func:`neighbor_heterogeneity`: a neighbor in several
+    communities contributes each of them, and a node's own membership never counts.
+
+    Args:
+        adjacency: Symmetric graph adjacency, any scipy.sparse format, shape
+            ``(n, n)``.
+        communities: Node ID -> set of community indices; nodes absent from it carry
+            no label.
+
+    Returns:
+        Array of shape ``(n,)``, dtype ``int64``: the number of distinct communities
+        among the node's neighbors (``0`` for an isolated node or one whose neighbors
+        are all unlabeled).
+    """
+    adjacency = adjacency.tocsr()
+    counts = np.zeros(adjacency.shape[0], dtype=np.int64)
+    for node in range(adjacency.shape[0]):
+        start, end = adjacency.indptr[node], adjacency.indptr[node + 1]
+        seen: set[int] = set()
+        for neighbor in adjacency.indices[start:end]:
+            seen |= communities.get(int(neighbor), set())
+        counts[node] = len(seen)
+    return counts
 
 
 def labels_to_communities(labels: npt.NDArray[np.int64]) -> dict[int, set[int]]:

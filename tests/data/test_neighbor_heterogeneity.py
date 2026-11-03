@@ -10,6 +10,7 @@ import scipy.sparse as sp
 
 from tnbbeta_vae.data.neighbor_heterogeneity import (
     labels_to_communities,
+    neighbor_community_count,
     neighbor_heterogeneity,
 )
 
@@ -115,3 +116,15 @@ def test_labels_to_communities_round_trips_through_neighbor_heterogeneity() -> N
     heterogeneity = neighbor_heterogeneity(adjacency, communities)
 
     assert heterogeneity[0] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_neighbor_community_count_counts_distinct_communities_not_neighbors() -> None:
+    # Node 0 has three neighbors but only two distinct communities among them
+    # (node 3 is in both); nodes 1-3 each see only node 0 (community 7); node 4 is
+    # isolated.
+    adjacency = _adjacency([(0, 1), (0, 2), (0, 3)], num_nodes=5)
+    communities = {0: {7}, 1: {0}, 2: {0}, 3: {0, 1}}
+
+    counts = neighbor_community_count(adjacency, communities)
+
+    assert counts.tolist() == [2, 1, 1, 1, 0]

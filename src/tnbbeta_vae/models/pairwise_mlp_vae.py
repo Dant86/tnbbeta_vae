@@ -30,12 +30,15 @@ from torch.nn.functional import binary_cross_entropy_with_logits
 
 from tnbbeta_vae.models.architectures.mlp import mlp_stack
 from tnbbeta_vae.models.heads import (
+    P_RAW_INIT,
     LatentFamily,
     head_size,
+    init_tnbbeta_p_bias,
     posterior_centre,
     posterior_from_raw,
     standard_prior,
 )
+from tnbbeta_vae.models.losses.sampling import sample_and_kl
 from tnbbeta_vae.models.pairwise import pairwise_logits
 from tnbbeta_vae.registry import register_model
 
@@ -81,6 +84,15 @@ class PairwiseMlpVAEConfig(BaseModel):
             (default) learns a positive multiplier on it, starting at 5; a
             number fixes it (1.0 is the plain inner product). Ignored for the
             Gaussian, whose latent scale is free.
+        p_init_offset: For ``family="tnbbeta"`` only: initial raw p bias of the
+            posterior head (``heads.P_RAW_INIT``; ``0.0`` reproduces the previous
+            initialisation exactly). Changes no parameter name or shape.
+        epsilon_floor: For ``family="tnbbeta"`` (and a learned epsilon) only: the
+            smallest epsilon the head can produce, ``epsilon = softplus(raw) +
+            epsilon_floor``. The default ``1e-4`` reproduces every earlier run and
+            checkpoint exactly; changing it shifts a checkpoint's epsilon, so set
+            it only for new runs (0.3 is suggested on tasks that can reach small
+            epsilon, where a posterior at the floor is a pair of point masses).
     """
 
     family: LatentFamily = "tnbbeta"
@@ -88,6 +100,8 @@ class PairwiseMlpVAEConfig(BaseModel):
     hidden_dims: list[int] = [64, 32]
     latent_dim: int = 16
     fixed_temperature: float | None = None
+    p_init_offset: float = P_RAW_INIT
+    epsilon_floor: float = 1e-4
 
 
 @register_model("pairwise_mlp_vae", config_cls=PairwiseMlpVAEConfig)
@@ -109,6 +123,10 @@ class PairwiseMlpVAE(nn.Module):
         self.posterior_head = nn.Linear(
             config.hidden_dims[-1], head_size(config.family, config.latent_dim)
         )
+        if config.family == "tnbbeta":
+            init_tnbbeta_p_bias(
+                self.posterior_head, config.latent_dim, offset=config.p_init_offset
+            )
         self.log_temperature = nn.Parameter(
             torch.tensor(math.log(_INITIAL_TEMPERATURE)),
             requires_grad=config.fixed_temperature is None,
@@ -135,7 +153,7 @@ class PairwiseMlpVAE(nn.Module):
             the number of items), ``"link_loss"`` and ``"kl"`` (mean per item).
         """
         posterior, prior = self.posterior_and_prior(batch)
-        z = posterior.rsample()
+        z, kl = sample_and_kl(posterior, prior)
         positives = batch.positive_pairs
         negatives = self._sample_negatives(batch)
         all_pairs = torch.cat([positives, negatives], dim=1)
@@ -144,10 +162,6 @@ class PairwiseMlpVAE(nn.Module):
             [torch.ones(positives.shape[1]), torch.zeros(negatives.shape[1])]
         ).to(logits.device)
         link_loss = binary_cross_entropy_with_logits(logits, targets)
-        try:
-            kl = torch.distributions.kl_divergence(posterior, prior)
-        except NotImplementedError:
-            kl = posterior.log_prob(z) - prior.log_prob(z)
         kl_mean = kl.mean()
         return {
             "loss": link_loss + kl_weight * kl_mean / batch.num_items,
@@ -177,7 +191,12 @@ class PairwiseMlpVAE(nn.Module):
         return posterior_centre(self.config.family, posterior)
 
     def _posterior(self, raw: Tensor) -> Distribution:
-        return posterior_from_raw(self.config.family, raw, self.config.latent_dim)
+        return posterior_from_raw(
+            self.config.family,
+            raw,
+            self.config.latent_dim,
+            epsilon_floor=self.config.epsilon_floor,
+        )
 
     def _prior(self, raw: Tensor) -> Distribution:
         return standard_prior(self.config.family, self.config.latent_dim, raw.device)

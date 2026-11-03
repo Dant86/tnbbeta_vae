@@ -96,12 +96,14 @@ def test_more_elbo_samples_reduces_loss_variance() -> None:
     multi_sample_model.load_state_dict(single_sample_model.state_dict())
     x = torch.rand(6, 3, 32, 32)
 
-    single_sample_losses = torch.stack(
-        [single_sample_model.training_step(x)["loss"] for _ in range(100)]
-    )
-    multi_sample_losses = torch.stack(
-        [multi_sample_model.training_step(x)["loss"] for _ in range(100)]
-    )
+    # 16x the samples should cut the std ~4x, so 30 draws separate them easily.
+    with torch.no_grad():
+        single_sample_losses = torch.stack(
+            [single_sample_model.training_step(x)["loss"] for _ in range(30)]
+        )
+        multi_sample_losses = torch.stack(
+            [multi_sample_model.training_step(x)["loss"] for _ in range(30)]
+        )
 
     assert multi_sample_losses.std() < single_sample_losses.std()
 

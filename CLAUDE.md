@@ -163,6 +163,36 @@ automatically on commit, excluding `notebooks/`.
   per-family `d`/`d+1` dimension sweep are the next, broader empirical step, not yet
   run (`writeup/results/dimension_sweep_and_mag_coauthor_infra_2026-10-09.md` is
   infrastructure-only, no results yet).
+- `GraphVAEConfig.fixed_epsilon` (TNBBeta only; `heads.epsilon_from_m(m, latent_dim)` converts
+  a modality offset `m = epsilon - (latent_dim - 1) / 2`) pins every node's epsilon; default
+  `None` leaves the head shape and existing checkpoints unchanged. `apps.link_prediction.main`
+  and `apps.synthetic.sbm_recovery` expose it as `--fixed-m`. **Any single-seed or
+  single-configuration `apps.link_prediction.main` run must pass `--results-name`**: the default
+  summary path `link_prediction/<dataset>[_nofeat]_<family>.json` is the full grid search behind
+  the paper's Figure 5 and gets silently overwritten otherwise (this happened once; see
+  `writeup/results/fixed_m_sweeps_baselines_and_parameter_probes_2026-10-30.md`).
+- `GraphVAEConfig.fixed_kappa` / `--fixed-kappa` (vMF and power-spherical only; head shrinks by one) pins every node's concentration, and `apps.link_prediction.main --log-trajectory` writes per-epoch kappa / `r_bar` / loss / head-gradient / validation-AUC statistics (forked RNG, so results are unchanged). Free-kappa vMF/PS barely learn kappa in 200 epochs on Cora/MAG-CS while pinned `kappa = d` matches TNBBeta, so a "TNBBeta beats vMF/PS" link-prediction comparison with learned kappa partly measures kappa optimization (`writeup/results/vmf_ps_fixed_kappa_and_training_dynamics_2026-10-30.md`).
+- `tnbbeta_vae.data.block_graph` (block models with arbitrary affinity: assortative, bipartite, core-periphery, optional degree correction) returns the *true* pair probabilities alongside the sampled graph; `tnbbeta_vae.models.predictive` scores posterior-predictive edge probabilities (log loss, ECE, KL to the truth via `balanced_truth`, since 1:1 negative sampling trains `P / (P + rho)`, not `P`); `apps/synthetic/graph_families.py` + `scripts/slurm/graph_families_screen.sbatch` run it across conditions. Centre AUC cannot see posterior shape, so judge families here by the predictive metrics, and always include the pinned-kappa and equal-budget controls. `tnbbeta_vae.data.structured_graph` adds latent-sphere, mixed-membership, scale-free and ring graphs (eight presets in all); runs log `posterior_stats` per block, and free TNBBeta lands at `m < 0` on every one of them, including graphs it cannot learn, yet its `second_mode_mass` (the lesser-hemisphere share about each node's axis; `r_bar` cannot show it) is 0 -- the posterior is a single cap. `GraphVAEConfig.decoder_bias` (default off, parameter only when on) adds a learned logit offset; `latent_kernel_graph` is the graph it makes exactly representable. See `writeup/results/graph_family_screening_2026-10-30.md` (no structure found where TNBBeta is required; a hub-and-spoke preset was ill-posed because the held-out edge was each leaf's only hub edge).
+- `tnbbeta_vae.data.graph_space` + `apps/synthetic/graph_search.py` + `apps/eval/graph_search_stats.py` +
+  `scripts/slurm/graph_search.sbatch` are the wide graph-type search (ten graph families, difficulty set by a
+  target oracle AUC, paired intersection-union tests with BH/Holm). Design and tests are fixed in
+  `writeup/results/graph_search_preregistration_2026-10-31.md` -- change the analysis only with an entry under
+  its "Deviations". `GraphVAEConfig.initial_kappa` starts vMF/PS kappa at a value and still trains it. Result:
+  TNBBeta beats tuned vMF/PS on probability metrics (log loss, calibration, KL) in 46 confirmed
+  (config, metric) pairs, never on centre AUC or rank correlation, and it is significantly worse in many other
+  pairs (`graph_search_results_2026-10-31.md`).
+- `apps/eval/bucketed_link_prediction.py` (per-bucket AUC by training degree / neighbor-community
+  count, pooled over both endpoints of held-out edges) and `apps/eval/param_probe.py` (what each
+  family's per-node posterior parameters encode, and AUC decoded from posterior samples vs.
+  centres) read checkpoints only and rebuild the edge split from the seed. Both run the encoder
+  over the *training* adjacency; `apps.eval.graph_posterior_shape.graph_to_batch` normalizes the
+  *full* graph, which the model never trained on -- do not use it for per-node statistics tied to
+  a trained checkpoint without swapping in `normalized_adjacency(split.train_adjacency)`.
+- The `general` SLURM QOS allows 24 running and 200 submitted jobs per user, so `fixed_m_*`
+  array scripts pack several cells per task (parallel processes sharing one GPU) instead of one
+  task per cell. Do not pass `--device cuda` explicitly in sbatch scripts: it bypasses
+  `select_device`'s exit-75 no-GPU handling, and a node with broken CUDA then fails every task in
+  seconds and drains the whole array.
 - `src/tnbbeta_vae/training/`: `Trainer` is a minimal, model-agnostic
   epoch loop -- model-specific logic belongs in the model's
   `training_step`, not in `Trainer`. It also writes/reads checkpoints
