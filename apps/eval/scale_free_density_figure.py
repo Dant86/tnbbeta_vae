@@ -708,7 +708,7 @@ def _add_bars(
         zeroline=True,
         zerolinecolor=INK,
         gridcolor=GRID,
-        title_text="Paired Effect dz (Up = TNBBeta Better)" if column == 1 else None,
+        title_text=r"$\text{Paired Effect}\ d_z$" if column == 1 else None,
         row=2,
         col=column,
     )
@@ -773,19 +773,14 @@ def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
         col=4,
     )
     figure.update_yaxes(
-        title_text="Truth-KL Advantage E_c (Nats; Up = TNBBeta Better)",
+        title_text=r"$\text{Truth-KL Advantage}\ E_c$",
         gridcolor=GRID,
         linecolor=INK,
         row=1,
         col=4,
     )
     figure.add_annotation(
-        text=(
-            f"Pooled Evidence: All {len(points)} Fresh Configs<br>"
-            f"within-family Spearman {pooled['h1_spearman']:+.3f} (pre-registered H1, one-sided p = 0.0001)<br>"
-            "per config vs the less favorable of tuned vMF / PowerSpherical;<br>"
-            "Spearman is on S_c = E_c / KL0 (registered outcome), y shows E_c"
-        ),
+        text=f"Pooled Evidence: All {len(points)} Fresh Configs",
         xref="x4 domain",
         yref="y4 domain",
         x=0.0,
@@ -793,8 +788,21 @@ def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
         xanchor="left",
         yanchor="bottom",
         showarrow=False,
-        align="left",
-        font={"size": 12},
+        font={"size": 14},
+    )
+    figure.add_annotation(
+        text=f"$\\rho = {pooled['h1_spearman']:.3f},\\ p = 0.0001$",
+        xref="x4 domain",
+        yref="y4 domain",
+        x=0.98,
+        y=0.03,
+        xanchor="right",
+        yanchor="bottom",
+        showarrow=False,
+        font={"size": 15, "color": "white"},
+        bgcolor=FAMILY_COLOURS["scale_free"],
+        bordercolor=FAMILY_COLOURS["scale_free"],
+        borderpad=6,
     )
 
 
