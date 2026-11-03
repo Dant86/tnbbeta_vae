@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from apps.synthetic import linear_decoder_ring as study
 from apps.synthetic import linear_decoder_ring_plot as plot
@@ -20,4 +21,5 @@ def test_metric_figure_builds_from_tiny_runs(tmp_path: Path) -> None:
     runs = study.load_runs(tmp_path)
     figure = plot.metric_figure(runs, "gap_elbo", "Test ELBO gap (nats)", "log")
     assert len(tuple(figure.data)) == 2 * len(study.ARMS) * len(study.SIGMAS)
-    assert figure.layout.legend.orientation == "h"
+    layout: Any = figure.layout
+    assert layout.legend.orientation == "h"

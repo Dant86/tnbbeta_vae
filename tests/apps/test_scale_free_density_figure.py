@@ -162,21 +162,25 @@ def test_drawn_graphs_get_denser_with_the_level() -> None:
 def test_figure_layout_matches_the_preregistration() -> None:
     figure = sdf.build_figure(_results(0.1))
     layout: Any = figure.layout
-    assert layout.legend.orientation == "h"
-    assert layout.legend.y < 0
+    x_domain, y_domain = layout.xaxis4.domain, layout.yaxis4.domain
+    assert x_domain[0] < layout.legend.x < x_domain[1]  # legend sits inside the scatter
+    assert y_domain[0] < layout.legend.y <= y_domain[1]
     assert layout.template.layout.font.family == sdf.FONT_FAMILY
     bars = [t for t in cast("list[Any]", list(figure.data)) if t.type == "bar"]
     assert len(bars) == 6  # two groups x three levels
-    assert sum(len(b.x) for b in bars) == 15
+    assert sum(len(b.x) for b in bars) == 6  # truth KL and sampled AUROC per level
+    assert not any(b.showlegend for b in bars)
     scatters = [
         t
         for t in cast("list[Any]", list(figure.data))
         if t.type == "scatter" and t.mode == "markers"
     ]
-    assert len(scatters) == 3 + len(sdf.FAMILIES)  # drawn graphs + one per family
+    assert len(scatters) == 3 + 2  # drawn graphs + other families + scale free
+    legend_names = [t.name for t in scatters if t.name]
+    assert legend_names == ["Other Families", "Scale Free (Drawn Family)"]
     text = " ".join(a.text for a in layout.annotations)
-    for phrase in ("selection", "NOT varied", "NOT from the drawn graphs", "unbiased"):
-        assert phrase.lower() in text.lower() or phrase in text
+    assert "<b>" not in text
+    assert "Caption" not in text
 
 
 def test_density_stage_is_extended_and_has_its_own_seed_range() -> None:
