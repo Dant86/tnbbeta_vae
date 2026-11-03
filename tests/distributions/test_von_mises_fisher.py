@@ -146,3 +146,51 @@ def test_rsample_on_the_circle_is_finite_even_if_the_transverse_draw_is_zero(
     z = distribution.rsample()
 
     assert torch.isfinite(z).all()
+
+
+def _bessel_ratio(m: int, kappa: float) -> float:
+    return math.exp(_log_bessel_i(m / 2, kappa) - _log_bessel_i(m / 2 - 1, kappa))
+
+
+def _mean_cosine(m: int, kappa: float, exact_envelope: bool, n: int = 200_000) -> float:
+    torch.manual_seed(0)
+    loc = torch.nn.functional.normalize(torch.randn(1, m, dtype=torch.float64), dim=-1)
+    dist = VonMisesFisher(
+        loc,
+        torch.full((1, 1), kappa, dtype=torch.float64),
+        exact_envelope=exact_envelope,
+    )
+    return (dist.sample(torch.Size([n])) * loc).sum(-1).mean().item()
+
+
+@pytest.mark.parametrize(
+    ("m", "kappa"), [(5, 30.0), (17, 17.0), (33, 17.0), (65, 40.0)]
+)
+def test_exact_envelope_matches_bessel_mean(m: int, kappa: float) -> None:
+    expected = _bessel_ratio(m, kappa)
+
+    # Standard error <= 0.0012 at n = 200000; five sigma.
+    assert _mean_cosine(m, kappa, True) == pytest.approx(expected, abs=0.006)
+
+
+def test_default_sampler_is_exact_and_legacy_flag_keeps_bias() -> None:
+    """The default is exact; ``exact_envelope=False`` is the biased S-VAE reference."""
+    loc = torch.nn.functional.normalize(torch.randn(1, 17, dtype=torch.float64), dim=-1)
+    assert VonMisesFisher(
+        loc, torch.full((1, 1), 17.0, dtype=torch.float64)
+    ).exact_envelope
+    expected = _bessel_ratio(17, 17.0)
+
+    assert expected - _mean_cosine(17, 17.0, False) > 0.01
+
+
+def test_exact_envelope_equals_default_below_the_taylor_switch() -> None:
+    loc = torch.nn.functional.normalize(torch.randn(4, 9), dim=-1)
+    scale = torch.full((4, 1), 6.0)
+    torch.manual_seed(1)
+    default = VonMisesFisher(loc, scale, exact_envelope=False).sample(torch.Size([50]))
+    torch.manual_seed(1)
+    exact = VonMisesFisher(loc, scale, exact_envelope=True).sample(torch.Size([50]))
+
+    torch.testing.assert_close(default, exact, atol=1e-4, rtol=0)
+    assert torch.allclose(exact.norm(dim=-1), torch.ones(50, 4), atol=1e-5)

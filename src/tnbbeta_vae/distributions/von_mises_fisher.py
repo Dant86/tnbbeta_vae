@@ -53,6 +53,7 @@ class VonMisesFisher(Distribution):
         scale: Tensor,
         validate_args: bool | None = None,
         k: int = 1,
+        exact_envelope: bool = True,
     ) -> None:
         """Initializes the distribution.
 
@@ -62,7 +63,16 @@ class VonMisesFisher(Distribution):
             validate_args: Whether to validate arguments.
             k: Number of candidate proposals drawn per rejection-sampling
                 round.
+            exact_envelope: If ``True`` (the default), the rejection sampler uses
+                Wood's exact envelope parameter ``b`` for every ``kappa``. ``False``
+                restores the S-VAE reference code's Taylor switch for ``kappa > 10``,
+                which biases draws for ``kappa`` of about 10-60 at ``m >= 5`` (mean
+                cosine too low; see
+                ``writeup/results/vmf_sampler_bias_audit_2026-11-03.md``). Pass
+                ``False`` only to reproduce results produced before the default
+                changed.
         """
+        self.exact_envelope = exact_envelope
         self.dtype = loc.dtype
         self.loc = loc
         self.scale = scale
@@ -169,6 +179,19 @@ class VonMisesFisher(Distribution):
 
     def _sample_w_rej(self, shape: torch.Size) -> Tensor:
         c = torch.sqrt((4 * (self.scale**2)) + (self._m - 1) ** 2)
+        if self.exact_envelope:
+            # Algebraically (c - 2 kappa) / (m - 1) but without its cancellation.
+            b = (self._m - 1) / (c + 2 * self.scale)
+        else:
+            b = self._blended_envelope_b(c)
+
+        a = (self._m - 1 + 2 * self.scale + c) / 4
+        d = (4 * a * b) / (1 + b) - (self._m - 1) * math.log(self._m - 1)
+
+        _, w = self._while_loop(b, a, d, shape, k=self.k)
+        return w
+
+    def _blended_envelope_b(self, c: Tensor) -> Tensor:
         b_true = (-2 * self.scale + c) / (self._m - 1)
 
         # Taylor approximation with a smooth switch from 10 < scale < 11 to
@@ -181,13 +204,7 @@ class VonMisesFisher(Distribution):
             ),
             torch.tensor([1.0], dtype=self.dtype, device=self.device),
         )
-        b = b_app * s + b_true * (1 - s)
-
-        a = (self._m - 1 + 2 * self.scale + c) / 4
-        d = (4 * a * b) / (1 + b) - (self._m - 1) * math.log(self._m - 1)
-
-        _, w = self._while_loop(b, a, d, shape, k=self.k)
-        return w
+        return b_app * s + b_true * (1 - s)
 
     def _while_loop(
         self,
