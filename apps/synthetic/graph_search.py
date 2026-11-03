@@ -74,7 +74,11 @@ SEED_BASE = {
     "confirmation": 20_000_000,
     "kappa_grid": 30_000_000,
     "axis_diagnostic": 40_000_000,
+    "fresh": 50_000_000,
 }
+# Stages whose runs also compute ``tnbbeta_vae.models.search_metrics`` and keep a
+# checkpoint (the metric-first study); all other stages are unchanged.
+EXTENDED_STAGES = ("fresh",)
 # Fixed-kappa grid of the ``kappa_grid`` stage (diffuse to tight; ``DIM`` is the pin).
 KAPPA_GRID = (4.0, 8.0, 16.0, 32.0, 64.0, 128.0)
 # Conditions and the model each trains. ``_init`` starts kappa at ``DIM`` and trains it
@@ -257,6 +261,11 @@ def build_manifest(
                             "num_nodes": config["num_nodes"],
                         }
                     )
+                    if stage in EXTENDED_STAGES:
+                        items[-1]["extended"] = True
+                        items[-1]["checkpoint"] = (
+                            f"graph_search/{stage}/checkpoints/{run_id}.pt"
+                        )
     items.sort(key=lambda item: (-item["num_nodes"], item["run_id"]))
     return items
 
@@ -289,6 +298,8 @@ def write_manifest(
     )
     directory = stage_dir(stage)
     (directory / "runs").mkdir(parents=True, exist_ok=True)
+    if stage in EXTENDED_STAGES:
+        (directory / "checkpoints").mkdir(parents=True, exist_ok=True)
     (directory / "configs.json").write_text(json.dumps(configs, indent=2))
     path = directory / "manifest.jsonl"
     path.write_text("\n".join(json.dumps(item) for item in items) + "\n")
@@ -357,6 +368,8 @@ def run_item(
     model = GraphVAE(model_config).to(device)
     model.load_state_dict(state)
     metrics = evaluate(model, sample, split, seed=item["seed"])
+    if item.get("extended"):
+        metrics.update(_extended(model, sample, split, spec, item, device))
     return {
         **item,
         "family": spec.family,
@@ -366,6 +379,30 @@ def run_item(
         "diverged": trained.get("diverged", 0.0),
         "seconds": time.time() - start,
     }
+
+
+def _extended(
+    model: GraphVAE,
+    sample: SyntheticGraph,
+    split: LinkSplit,
+    spec: GraphSpec,
+    item: dict[str, Any],
+    device: torch.device,
+) -> dict[str, float]:
+    """Computes the metric-first extras and saves the weights (``fresh`` stage)."""
+    from tnbbeta_vae.models.search_metrics import extended_metrics  # noqa: PLC0415
+
+    path = checkpoint_dir() / item["checkpoint"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(model.state_dict(), path)
+    batch = GraphBatch(
+        features=torch.as_tensor(sample.features.toarray(), dtype=torch.float32),
+        norm_adjacency=normalized_adjacency(split.train_adjacency),
+        positive_edges=torch.as_tensor(
+            np.stack(sp.triu(split.train_adjacency, k=1).nonzero()), dtype=torch.long
+        ),
+    ).to(device)
+    return extended_metrics(model, batch, sample, split, spec, seed=item["seed"])
 
 
 def model_config_for(condition: str, in_features: int) -> GraphVAEConfig:
