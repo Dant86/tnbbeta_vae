@@ -510,3 +510,154 @@ def test_fixed_kappa_out_of_range_is_rejected() -> None:
     )
     with pytest.raises(ValueError, match="kappa"):
         model._posterior(torch.randn(2, model.second.out_features))  # noqa: SLF001
+
+
+@pytest.mark.parametrize("family", ["gaussian", "vmf", "tnbbeta"])
+def test_decoder_bias_adds_a_parameter_only_when_requested(family: str) -> None:
+    default = GraphVAE(GraphVAEConfig(family=family, in_features=10, latent_dim=4))  # type: ignore[arg-type]
+    biased = GraphVAE(
+        GraphVAEConfig(family=family, in_features=10, latent_dim=4, decoder_bias=True)  # type: ignore[arg-type]
+    )
+
+    assert "bias" not in default.state_dict()
+    assert set(biased.state_dict()) - set(default.state_dict()) == {"bias"}
+    assert float(default.logit_bias()) == 0.0
+
+
+def test_decoder_bias_shifts_every_link_logit() -> None:
+    config = GraphVAEConfig(
+        family="vmf", in_features=10, latent_dim=4, decoder_bias=True
+    )
+    model = GraphVAE(config)
+    z = torch.nn.functional.normalize(torch.randn(6, 4), dim=-1)
+    edges = torch.tensor([[0, 1, 2], [3, 4, 5]])
+    before = model.link_logits(z, edges)
+    with torch.no_grad():
+        assert model.bias is not None
+        model.bias.fill_(-2.0)
+
+    assert torch.allclose(model.link_logits(z, edges), before - 2.0)
+
+
+@pytest.mark.parametrize("family", ["vmf", "power_spherical"])
+def test_initial_kappa_starts_kappa_near_the_target_and_leaves_it_trainable(
+    family: str,
+) -> None:
+    torch.manual_seed(0)
+    config = GraphVAEConfig(
+        family=family,  # type: ignore[arg-type]
+        in_features=20,
+        latent_dim=16,
+        initial_kappa=16.0,
+    )
+    model = GraphVAE(config)
+    batch = GraphBatch(
+        features=torch.eye(20),
+        norm_adjacency=torch.eye(20).to_sparse(),
+        positive_edges=torch.tensor([[0, 1], [1, 2]]),
+    )
+    posterior, _ = model.posterior_and_prior(batch)
+
+    kappa = posterior.scale if family == "vmf" else posterior.kappa  # type: ignore[attr-defined]
+    assert 10.0 < float(kappa.mean()) < 22.0
+    assert model.second.weight.requires_grad
+    assert head_size(family, 16) == model.second.out_features  # type: ignore[arg-type]
+
+
+def test_initial_kappa_rejects_other_families_and_fixed_kappa() -> None:
+    with pytest.raises(ValueError, match="initial_kappa"):
+        GraphVAE(GraphVAEConfig(family="tnbbeta", in_features=5, initial_kappa=4.0))
+    with pytest.raises(ValueError, match="exclusive"):
+        GraphVAE(
+            GraphVAEConfig(
+                family="vmf", in_features=5, initial_kappa=4.0, fixed_kappa=4.0
+            )
+        )
+
+
+@pytest.mark.parametrize("family", ["gaussian", "vmf", "power_spherical", "tnbbeta"])
+def test_head_bias_adds_second_bias_only_when_requested(family: str) -> None:
+    kwargs: dict[str, Any] = {"family": family, "in_features": 10, "latent_dim": 4}
+    default = GraphVAE(GraphVAEConfig(**kwargs))
+    biased = GraphVAE(GraphVAEConfig(head_bias=True, **kwargs))
+
+    assert set(default.state_dict()) == {
+        "first.weight",
+        "log_temperature",
+        "second.weight",
+    }
+    assert set(biased.state_dict()) - set(default.state_dict()) == {"second.bias"}
+    assert biased.second.bias.shape == (default.second.out_features,)  # type: ignore[union-attr]
+    # An old (bias-free) state dict still loads strictly into a default model.
+    GraphVAE(GraphVAEConfig(head_bias=False, **kwargs)).load_state_dict(
+        default.state_dict(), strict=True
+    )
+
+
+def test_head_bias_is_added_after_aggregation_and_trains() -> None:
+    graph = _community_graph()
+    batch, _ = _batch(graph)
+    config = GraphVAEConfig(
+        family="gaussian", in_features=6, latent_dim=4, head_bias=True
+    )
+    model = GraphVAE(config)
+    bias = model.second.bias
+    assert bias is not None
+    with torch.no_grad():
+        bias.copy_(torch.arange(float(bias.numel())))
+    posterior, _ = model.posterior_and_prior(batch)
+    # Gaussian head: [mean (4), raw scale (4)]; the mean's offset is exactly bias[:4]
+    # at every node, not scaled by the node's adjacency row sum.
+    zero = GraphVAE(config)
+    zero.load_state_dict(model.state_dict())
+    with torch.no_grad():
+        zero.second.bias.zero_()  # type: ignore[union-attr]
+    shift = posterior.base_dist.loc - zero.posterior_and_prior(batch)[0].base_dist.loc  # type: ignore[attr-defined]
+    assert torch.allclose(shift, torch.arange(4.0).expand_as(shift), atol=1e-5)
+    model.training_step(batch)["loss"].backward()
+    assert bias.grad is not None
+    assert float(bias.grad.abs().sum()) > 0
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{}, {"fixed_epsilon": 1.5}],
+)
+def test_p_init_offset_sets_only_the_raw_p_bias_entry(extra: dict[str, Any]) -> None:
+    latent_dim = 5
+    base = {"family": "tnbbeta", "in_features": 10, "latent_dim": latent_dim}
+    torch.manual_seed(0)
+    plain = GraphVAE(GraphVAEConfig(head_bias=True, **base, **extra))
+    torch.manual_seed(0)
+    shifted = GraphVAE(
+        GraphVAEConfig(head_bias=True, p_init_offset=1.1, **base, **extra)
+    )
+    assert plain.second.bias is not None and shifted.second.bias is not None
+    assert float(shifted.second.bias[latent_dim]) == pytest.approx(1.1)
+    changed = (plain.second.bias != shifted.second.bias).nonzero().flatten().tolist()
+    assert changed == [latent_dim]
+    assert torch.equal(plain.second.weight, shifted.second.weight)
+
+
+def test_p_init_offset_is_ignored_without_head_bias_or_for_other_families() -> None:
+    torch.manual_seed(0)
+    a = GraphVAE(GraphVAEConfig(in_features=10, latent_dim=4))
+    torch.manual_seed(0)
+    b = GraphVAE(GraphVAEConfig(in_features=10, latent_dim=4, p_init_offset=1.1))
+    assert set(a.state_dict()) == set(b.state_dict())
+    assert torch.equal(a.second.weight, b.second.weight)
+    torch.manual_seed(0)
+    c = GraphVAE(
+        GraphVAEConfig(family="vmf", in_features=10, latent_dim=4, head_bias=True)
+    )
+    torch.manual_seed(0)
+    d = GraphVAE(
+        GraphVAEConfig(
+            family="vmf",
+            in_features=10,
+            latent_dim=4,
+            head_bias=True,
+            p_init_offset=1.1,
+        )
+    )
+    assert torch.equal(c.second.bias, d.second.bias)  # type: ignore[arg-type]

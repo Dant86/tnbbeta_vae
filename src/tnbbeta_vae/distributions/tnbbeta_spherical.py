@@ -39,13 +39,13 @@ import torch
 from torch import Tensor
 from torch.distributions import Distribution, constraints
 from torch.distributions.utils import broadcast_all
+from torch.nn import functional
 from torch.types import _size
 
-from tnbbeta_vae.distributions.tnbbeta_univariate import TNBBetaUnivariate
+from tnbbeta_vae.distributions.tnbbeta_univariate import _log_density, _sample_logit
 
 __all__ = ["TNBBetaSpherical"]
 
-_BOUNDARY_EPS = 1e-6
 _HOUSEHOLDER_DEGENERACY_EPS = 1e-6
 
 
@@ -154,20 +154,22 @@ class TNBBetaSpherical(Distribution):
         if self._validate_args:
             self._validate_sample(value)
 
-        w = (self.mean_direction * value).sum(-1)
-        w = w.clamp(-1.0 + _BOUNDARY_EPS, 1.0 - _BOUNDARY_EPS)
-        y = (w + 1) / 2
-
-        radial_log_prob = TNBBetaUnivariate(self.p, self.q, self.epsilon).log_prob(
-            y
-        ) - math.log(2)
-        jacobian = -((self.dim - 3) / 2) * torch.log1p(-(w**2))
-        log_area = _log_surface_area(self.dim - 1)
-
-        return radial_log_prob + jacobian - log_area
+        # y = (1 + w) / 2 = ||z + mu||^2 / 4 and 1 - y = ||z - mu||^2 / 4 for unit
+        # z, mu. Chord distances resolve points within float32 rounding of a
+        # pole, where ``1 - mu . z`` is exactly 0, and nothing is clamped.
+        tiny = torch.finfo(value.dtype).tiny
+        mu = self.mean_direction
+        log_y = torch.log(((value + mu) ** 2).sum(-1).clamp_min(tiny) / 4)
+        log_1my = torch.log(((value - mu) ** 2).sum(-1).clamp_min(tiny) / 4)
+        return self._log_prob_from_logs(log_y, log_1my)
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:  # noqa: B008
         """Draws reparameterized samples via the pole-then-reflect construction.
+
+        The latitude is drawn as a logit ``t`` (see
+        :meth:`TNBBetaUnivariate.rsample`), so ``w = tanh(t / 2)`` and
+        ``sqrt(1 - w^2) = sech(t / 2)`` stay accurate and finite for any
+        ``epsilon``, including spikes at the poles.
 
         Args:
             sample_shape: Shape of the i.i.d. sample batch to draw.
@@ -177,6 +179,38 @@ class TNBBetaSpherical(Distribution):
             ``sample_shape + batch_shape + (dim,)``, differentiable w.r.t.
             ``mean_direction``, ``p``, ``q``, and ``epsilon``.
         """
+        return self._rsample_with_logit(sample_shape)[0]
+
+    def rsample_with_log_prob(
+        self,
+        sample_shape: _size = torch.Size(),  # noqa: B008
+    ) -> tuple[Tensor, Tensor]:
+        """Draws reparameterized samples together with their exact log-density.
+
+        The log-density is evaluated from the sampled latitude logit ``t``
+        rather than from the returned vector. A unit vector cannot represent
+        ``1 - |w|`` below its floating-point resolution (about ``1e-16`` in
+        float64, ``1e-14`` in float32 through the chord form), so for
+        ``epsilon`` below about 0.03 -- where most of the mass sits within that
+        distance of the poles -- ``log_prob(rsample())`` under-states
+        ``E[log q]``; this method does not. Use it for Monte Carlo ``E_q[log q]``
+        (KL / ELBO) at small ``epsilon``.
+
+        Args:
+            sample_shape: Shape of the i.i.d. sample batch to draw.
+
+        Returns:
+            ``(z, log_q)``: samples with shape ``sample_shape + batch_shape +
+            (dim,)`` and their log-density with shape ``sample_shape +
+            batch_shape``; both differentiable w.r.t. all parameters.
+        """
+        z, t = self._rsample_with_logit(sample_shape)
+        return z, self._log_prob_from_logs(
+            -functional.softplus(-t), -functional.softplus(t)
+        )
+
+    def _rsample_with_logit(self, sample_shape: _size) -> tuple[Tensor, Tensor]:
+        """Draws ``(z, t)`` with ``t`` the latitude logit ``logit((1 + w) / 2)``."""
         shape = self._extended_shape(sample_shape)
         batch_shape, dim = shape[:-1], shape[-1]
 
@@ -185,16 +219,26 @@ class TNBBetaSpherical(Distribution):
         epsilon = self.epsilon.expand(batch_shape)
         mean_direction = self.mean_direction.expand(shape)
 
-        y = TNBBetaUnivariate(p, q, epsilon).rsample()
-        w = 2 * y - 1
+        t = _sample_logit(p, q, epsilon)
+        w = torch.tanh(t / 2)
+        # sech(t / 2) = 2 e^{-|t|/2} / (1 + e^{-|t|}); finite gradient at any |t|.
+        radius = (2 * torch.exp(-t.abs() / 2) / (1 + torch.exp(-t.abs()))).unsqueeze(-1)
 
         g = torch.randn((*batch_shape, dim - 1), dtype=w.dtype, device=w.device)
         v = g / g.norm(dim=-1, keepdim=True)
 
-        radius = torch.sqrt((1 - w**2).clamp_min(0)).unsqueeze(-1)
         z = torch.cat([w.unsqueeze(-1), radius * v], dim=-1)
 
-        return _householder_reflect(z, mean_direction)
+        return _householder_reflect(z, mean_direction), t
+
+    def _log_prob_from_logs(self, log_y: Tensor, log_1my: Tensor) -> Tensor:
+        """Log-density given ``log y`` and ``log(1 - y)`` with ``y = (1 + w) / 2``."""
+        radial_log_prob = _log_density(
+            log_y, log_1my, self.p, self.q, self.epsilon
+        ) - math.log(2)
+        # log(1 - w^2) = log(4 y (1 - y))
+        jacobian = -((self.dim - 3) / 2) * (log_y + log_1my + 2 * math.log(2))
+        return radial_log_prob + jacobian - _log_surface_area(self.dim - 1)
 
 
 def _log_surface_area(ambient_dim: int) -> float:

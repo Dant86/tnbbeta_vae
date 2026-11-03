@@ -25,11 +25,13 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 __all__ = [
+    "P_RAW_INIT",
     "LatentFamily",
     "epsilon_from_m",
     "fixed_kappa_posterior",
     "gaussian_posterior",
     "head_size",
+    "init_tnbbeta_p_bias",
     "posterior_centre",
     "posterior_from_raw",
     "power_spherical_kappa",
@@ -45,6 +47,12 @@ __all__ = [
 LatentFamily = Literal["gaussian", "vmf", "tnbbeta", "power_spherical"]
 
 _PARAM_EPS = 1e-4
+# Default initial value of the raw p output of a TNBBeta head: sigmoid(ln 3) = 0.75, so
+# a fresh posterior starts with a non-zero mean-direction signal (at raw 0, p = 0.5 is
+# exactly axis-symmetric and E[z] = 0). An initialisation convention only:
+# ``tnbbeta_posterior``'s map is unchanged, so checkpoints trained either way behave
+# identically once loaded.
+P_RAW_INIT = math.log(3)
 # Bounds for the posterior's p and q. A clamped value passes no gradient; 1e-6 keeps
 # the bound off the fitted values (at 1e-4, p sat exactly on it at latent_dim=2) while
 # staying above what float32 can resolve near 1 (about 1e-7).
@@ -62,6 +70,7 @@ def tnbbeta_posterior(
     latent_dim: int,
     fixed_epsilon: float | None = None,
     fixed_mean_direction: bool = False,
+    epsilon_floor: float = _PARAM_EPS,
 ) -> TNBBetaSpherical:
     """Builds a TNBBetaSpherical posterior from raw network outputs.
 
@@ -82,11 +91,16 @@ def tnbbeta_posterior(
             ``raw`` -- an ablation testing whether p/q/epsilon become informative
             once direction, the channel that otherwise carries essentially all
             per-example signal, is no longer available to carry it instead.
+        epsilon_floor: Constant added to ``softplus(raw_epsilon)``, i.e. the
+            smallest epsilon the head can produce. The default (``1e-4``) is the
+            long-standing value; changing it shifts the epsilon of every existing
+            checkpoint by the difference, so use a different value only for new
+            runs. Unused when ``fixed_epsilon`` is set.
 
     Returns:
         A batch of posteriors: unit mean direction (or the fixed pole), p and q
-        squashed to (0, 1) and clamped at 1e-6, and epsilon = softplus(raw) > 0
-        (or the fixed value).
+        squashed to (0, 1) and clamped at 1e-6, and epsilon = softplus(raw) +
+        ``epsilon_floor`` (or the fixed value).
     """
     direction_size = 0 if fixed_mean_direction else latent_dim
     epsilon_size = 0 if fixed_epsilon is not None else 1
@@ -98,12 +112,42 @@ def tnbbeta_posterior(
     else:
         mean_direction = _unit_direction(raw_direction)
     if fixed_epsilon is None:
-        epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + _PARAM_EPS
+        epsilon = nn.functional.softplus(raw_epsilon.squeeze(-1)) + epsilon_floor
     else:
         epsilon = torch.full_like(raw_p.squeeze(-1), fixed_epsilon)
     p = raw_p.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     q = raw_q.squeeze(-1).sigmoid().clamp(_PQ_CLAMP, 1 - _PQ_CLAMP)
     return TNBBetaSpherical(mean_direction, p, q, epsilon)
+
+
+def init_tnbbeta_p_bias(
+    head: nn.Linear,
+    latent_dim: int,
+    fixed_mean_direction: bool = False,
+    offset: float = P_RAW_INIT,
+) -> None:
+    """Sets the bias entry of a TNBBeta head that feeds the raw p to ``offset``.
+
+    Only that one entry changes; every other weight and bias keeps its default
+    ``nn.Linear`` initialisation, and no parameter is added, removed or reshaped. The
+    raw layout is ``[direction (latent_dim, absent if fixed_mean_direction), p, q,
+    epsilon (absent if fixed_epsilon)]``, so p sits at index ``latent_dim`` (or ``0``).
+
+    Args:
+        head: The final ``nn.Linear`` producing :func:`tnbbeta_posterior`'s raw input.
+        latent_dim: Ambient dimension of the sphere.
+        fixed_mean_direction: Whether the head omits the direction outputs.
+        offset: Value for the raw p bias. ``0.0`` is a no-op (the head keeps exactly the
+            previous random initialisation, including its random p bias), so the
+            pre-offset initialisation stays reproducible.
+    """
+    if offset == 0.0:
+        return
+    if head.bias is None:
+        raise ValueError("The head has no bias to initialise.")
+    index = 0 if fixed_mean_direction else latent_dim
+    with torch.no_grad():
+        head.bias[index] = offset
 
 
 def epsilon_from_m(m: float, latent_dim: int) -> float:
@@ -261,7 +305,10 @@ def head_size(family: LatentFamily, latent_dim: int) -> int:
 
 
 def posterior_from_raw(
-    family: LatentFamily, raw: Tensor, latent_dim: int
+    family: LatentFamily,
+    raw: Tensor,
+    latent_dim: int,
+    epsilon_floor: float = _PARAM_EPS,
 ) -> Distribution:
     """Builds a distribution of ``family`` from ``head_size`` raw outputs per row.
 
@@ -269,6 +316,8 @@ def posterior_from_raw(
         family: ``"gaussian"``, ``"vmf"``, ``"tnbbeta"`` or ``"power_spherical"``.
         raw: Raw outputs, shape ``(..., head_size(family, latent_dim))``.
         latent_dim: Latent dimension (ambient dimension for the sphere families).
+        epsilon_floor: TNBBeta only: the head's smallest epsilon (see
+            :func:`tnbbeta_posterior`). Ignored by the other families.
 
     Returns:
         A batch of distributions over ``latent_dim``-dimensional vectors.
@@ -279,7 +328,7 @@ def posterior_from_raw(
         return vmf_posterior(raw[..., :-1], raw[..., -1:])
     if family == "power_spherical":
         return power_spherical_posterior(raw[..., :-1], raw[..., -1:])
-    return tnbbeta_posterior(raw, latent_dim)
+    return tnbbeta_posterior(raw, latent_dim, epsilon_floor=epsilon_floor)
 
 
 def posterior_centre(family: LatentFamily, distribution: Distribution) -> Tensor:
