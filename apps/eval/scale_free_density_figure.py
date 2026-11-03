@@ -56,8 +56,9 @@ from tnbbeta_vae.plotting import FONT_FAMILY, TEMPLATE_NAME
 Array = npt.NDArray[np.float64]
 
 LEVELS = ("low", "med", "high")
+LEVEL_NAMES = {"low": "Low", "med": "Medium", "high": "High"}
 RUN_DEGREES = {"low": 6.0, "med": 15.0, "high": 35.0}
-DRAWN_DEGREES = {"low": 2.0, "med": 5.0, "high": 12.0}
+DRAWN_DEGREES = {"low": 2.0, "med": 8.0, "high": 20.0}
 NUM_NODES = 600
 CONTRAST = 13.0
 DRAWN_NODES = 36
@@ -77,6 +78,7 @@ PROBABILITY_METRICS = ("truth_kl", "ece", "sampled_log_loss")
 STAMP = "2026-11-03"
 INK = "#1a1a1a"
 GRID = "#e4e4e4"
+OTHER_GREY = "#b8b8b8"
 GROUP_COLOURS = {"probability": "#1baf7a", "ranking": "#eb6834"}
 FAMILY_COLOURS = dict(
     zip(
@@ -289,7 +291,7 @@ def pooled_points() -> list[dict[str, Any]]:
     """Per fresh config: realised degree, nominal degree, and the truth-KL outcome ``E_c``.
 
     ``E_c`` is the pre-registered H1 outcome: the mean over draws of the paired truth-KL
-    difference versus the less favourable of ``vmf_init`` / ``power_spherical_init``
+    difference versus the less favorable of ``vmf_init`` / ``power_spherical_init``
     (positive = TNBBeta better).
     """
     table = load_table("fresh")
@@ -538,18 +540,6 @@ def drawn_graph(level: str) -> dict[str, Any]:
 # ----------------------------------------------------------------------- figure
 
 
-CAPTION = (
-    "<b>Caption.</b> scale_free was chosen for this figure for visibility after looking at per-family slopes: a selection effect, so its slope is biased upward "
-    "(family interval spans 0).<br>"
-    "The pooled panel (right, all 200 fresh configs, trained with the library vMF sampler) is the unbiased evidence; the bars are a separate, pre-registered 3-level experiment.<br>"
-    "Degree heterogeneity is NOT varied (tail index and node count fixed; not supported by the data: CV given degree not detected).<br>"
-    "Bars come from full-size runs (600 nodes, 32 fresh draws per level, tuned vMF / PowerSpherical, exact vMF sampler), NOT from the drawn graphs<br>"
-    "(36 nodes, mean degree rescaled to 2 / 5 / 12 to keep the 6 : 15 : 35 ratio).<br>"
-    "Bars: paired effect size dz versus the better of vMF and PowerSpherical, 95% bootstrap CI, up = TNBBeta better for every metric; "
-    "* = BH-significant (q &lt; 0.05, 15 Wilcoxon tests).<br>Losses are shown, not removed."
-)
-
-
 def build_figure(results: dict[str, Any]) -> go.Figure:
     """Builds the density figure from the analysis results (layout fixed in the pre-registration)."""
     figure = make_subplots(
@@ -562,40 +552,28 @@ def build_figure(results: dict[str, Any]) -> go.Figure:
             [{}, {}, {}, None],
         ],
         horizontal_spacing=0.045,
-        vertical_spacing=0.2,
+        vertical_spacing=0.1,
     )
     bounds = _bar_bounds(results)
     for column, level in enumerate(LEVELS, start=1):
         _add_drawing(figure, level, column, results)
-        _add_bars(figure, level, column, results, bounds, legend=column == 1)
+        _add_bars(figure, level, column, results, bounds, legend=False)
     _add_pooled(figure, results["pooled"])
     figure.update_layout(
         template=TEMPLATE_NAME,
         font={"family": FONT_FAMILY, "color": INK, "size": 13},
         width=1750,
-        height=950,
+        height=800,
         plot_bgcolor="white",
         legend={
             "orientation": "h",
             "yanchor": "top",
             "y": -0.14,
-            "x": 0.5,
+            "x": 0.8,
             "xanchor": "center",
         },
-        margin={"l": 70, "r": 30, "t": 110, "b": 300},
+        margin={"l": 70, "r": 30, "t": 110, "b": 120},
         barmode="overlay",
-    )
-    figure.add_annotation(
-        text=CAPTION,
-        xref="paper",
-        yref="paper",
-        x=0.0,
-        y=-0.25,
-        xanchor="left",
-        yanchor="top",
-        showarrow=False,
-        align="left",
-        font={"size": 12},
     )
     return figure
 
@@ -659,8 +637,8 @@ def _add_drawing(
     )
     figure.add_annotation(
         text=(
-            f"<b>{level.upper()} density</b><br>drawn mean degree {degree.mean():.1f}"
-            f"<br>(runs: {RUN_DEGREES[level]:g} nominal, {covariates['realised_degree']:.1f} realised)"
+            f"{LEVEL_NAMES[level]} Density<br>Drawn Mean Degree {degree.mean():.1f}"
+            f"<br>(Runs: {RUN_DEGREES[level]:g} Nominal, {covariates['realised_degree']:.1f} Realized)"
         ),
         xref=f"x{column if column > 1 else ''} domain",
         yref=f"y{column if column > 1 else ''} domain",
@@ -684,11 +662,11 @@ def _add_bars(
 ) -> None:
     records = results["levels"][level]
     for group, metrics in (
-        ("probability", PROBABILITY_METRICS),
-        ("ranking", ("sampled_auc", "centre_auc")),
+        ("probability", ("truth_kl",)),
+        ("ranking", ("sampled_auc",)),
     ):
         chosen = [r for r in records if r["metric"] in metrics]
-        names = dict(BAR_METRICS)
+        names = {"truth_kl": "Truth KL", "sampled_auc": "Sampled AUROC"}
         figure.add_trace(
             go.Bar(
                 x=[names[r["metric"]] for r in chosen],
@@ -730,48 +708,50 @@ def _add_bars(
         zeroline=True,
         zerolinecolor=INK,
         gridcolor=GRID,
-        title_text="paired effect dz (up = TNBBeta better)" if column == 1 else None,
+        title_text="Paired Effect dz (Up = TNBBeta Better)" if column == 1 else None,
         row=2,
         col=column,
     )
     figure.update_xaxes(
         tickangle=-40, linecolor=INK, tickfont={"size": 11}, row=2, col=column
     )
-    figure.add_annotation(
-        text=results["summary"][level].replace("; ", ";<br>"),
-        xref=f"x{column + 4} domain",
-        yref=f"y{column + 4} domain",
-        x=0.5,
-        y=1.03,
-        xanchor="center",
-        yanchor="bottom",
-        showarrow=False,
-        font={"size": 10.5},
-    )
 
 
 def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
     points = pooled["points"]
-    for family in FAMILIES:
-        chosen = [p for p in points if p["family"] == family]
+    others = [p for p in points if p["family"] != "scale_free"]
+    drawn = [p for p in points if p["family"] == "scale_free"]
+    for chosen, name, marker in (
+        (
+            others,
+            "Other Families",
+            {
+                "size": 7,
+                "color": OTHER_GREY,
+                "opacity": 0.7,
+                "line": {"color": "white", "width": 0.5},
+            },
+        ),
+        (
+            drawn,
+            "Scale Free (Drawn Family)",
+            {
+                "size": 10,
+                "color": FAMILY_COLOURS["scale_free"],
+                "opacity": 0.85,
+                "line": {"color": INK, "width": 1.6},
+            },
+        ),
+    ):
         figure.add_trace(
             go.Scatter(
                 x=[p["degree"] for p in chosen],
                 y=[p["E"] for p in chosen],
                 mode="markers",
-                marker={
-                    "size": 10 if family == "scale_free" else 7,
-                    "color": FAMILY_COLOURS[family],
-                    "opacity": 0.85,
-                    "line": {
-                        "color": INK if family == "scale_free" else "white",
-                        "width": 1.6 if family == "scale_free" else 0.5,
-                    },
-                },
+                marker=marker,
                 text=[p["config"] for p in chosen],
                 hovertemplate="%{text}<br>degree %{x:.1f}<br>E_c %{y:+.4f}<extra></extra>",
-                name=family.replace("_", " ")
-                + (" (drawn family)" if family == "scale_free" else ""),
+                name=name,
             ),
             row=1,
             col=4,
@@ -784,7 +764,7 @@ def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
     )
     figure.update_xaxes(
         type="log",
-        title_text="realised mean degree (log scale)",
+        title_text="Realized Mean Degree (Log Scale)",
         tickvals=[4, 6, 10, 15, 25, 40],
         ticktext=["4", "6", "10", "15", "25", "40"],
         gridcolor=GRID,
@@ -793,7 +773,7 @@ def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
         col=4,
     )
     figure.update_yaxes(
-        title_text="truth-KL advantage E_c (nats; up = TNBBeta better)",
+        title_text="Truth-KL Advantage E_c (Nats; Up = TNBBeta Better)",
         gridcolor=GRID,
         linecolor=INK,
         row=1,
@@ -801,9 +781,9 @@ def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
     )
     figure.add_annotation(
         text=(
-            f"<b>Pooled evidence: all {len(points)} fresh configs</b><br>"
+            f"Pooled Evidence: All {len(points)} Fresh Configs<br>"
             f"within-family Spearman {pooled['h1_spearman']:+.3f} (pre-registered H1, one-sided p = 0.0001)<br>"
-            "per config vs the less favourable of tuned vMF / PowerSpherical;<br>"
+            "per config vs the less favorable of tuned vMF / PowerSpherical;<br>"
             "Spearman is on S_c = E_c / KL0 (registered outcome), y shows E_c"
         ),
         xref="x4 domain",
