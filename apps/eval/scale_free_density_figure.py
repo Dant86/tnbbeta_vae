@@ -559,6 +559,9 @@ def build_figure(results: dict[str, Any]) -> go.Figure:
         _add_drawing(figure, level, column, results)
         _add_bars(figure, level, column, results, bounds, legend=False)
     _add_pooled(figure, results["pooled"])
+    layout: Any = figure.layout
+    scatter_x = layout.xaxis4.domain
+    scatter_y = layout.yaxis4.domain
     figure.update_layout(
         template=TEMPLATE_NAME,
         font={"family": FONT_FAMILY, "color": INK, "size": 13},
@@ -566,13 +569,14 @@ def build_figure(results: dict[str, Any]) -> go.Figure:
         height=800,
         plot_bgcolor="white",
         legend={
-            "orientation": "h",
+            "orientation": "v",
+            "xanchor": "left",
             "yanchor": "top",
-            "y": -0.14,
-            "x": 0.8,
-            "xanchor": "center",
+            "x": scatter_x[0] + 0.012,
+            "y": scatter_y[1] - 0.012,
+            "bgcolor": "rgba(255,255,255,0.85)",
         },
-        margin={"l": 70, "r": 30, "t": 110, "b": 120},
+        margin={"l": 70, "r": 30, "t": 110, "b": 90},
         barmode="overlay",
     )
     return figure
@@ -773,14 +777,14 @@ def _add_pooled(figure: go.Figure, pooled: dict[str, Any]) -> None:
         col=4,
     )
     figure.update_yaxes(
-        title_text=r"$\text{Truth-KL Advantage}\ E_c$",
+        title_text=r"$\text{Truth KL Advantage}\ E_c$",
         gridcolor=GRID,
         linecolor=INK,
         row=1,
         col=4,
     )
     figure.add_annotation(
-        text=f"Pooled Evidence: All {len(points)} Fresh Configs",
+        text=f"SphericalTNBBeta KL Advantage on {len(points)} Sampled Graphs",
         xref="x4 domain",
         yref="y4 domain",
         x=0.0,

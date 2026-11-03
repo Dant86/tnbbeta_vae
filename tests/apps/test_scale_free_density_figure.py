@@ -162,8 +162,9 @@ def test_drawn_graphs_get_denser_with_the_level() -> None:
 def test_figure_layout_matches_the_preregistration() -> None:
     figure = sdf.build_figure(_results(0.1))
     layout: Any = figure.layout
-    assert layout.legend.orientation == "h"
-    assert layout.legend.y < 0
+    x_domain, y_domain = layout.xaxis4.domain, layout.yaxis4.domain
+    assert x_domain[0] < layout.legend.x < x_domain[1]  # legend sits inside the scatter
+    assert y_domain[0] < layout.legend.y <= y_domain[1]
     assert layout.template.layout.font.family == sdf.FONT_FAMILY
     bars = [t for t in cast("list[Any]", list(figure.data)) if t.type == "bar"]
     assert len(bars) == 6  # two groups x three levels
