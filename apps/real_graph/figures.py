@@ -37,12 +37,18 @@ DATASET_LABELS = {
     "citeseer": "Citeseer",
     "pubmed": "Pubmed",
     "mag_cs": "MAG-CS",
+    "amazon_computers": "Amazon Computers",
+    "amazon_photo": "Amazon Photo",
+    "squirrel": "Squirrel",
 }
 DATASET_COLORS = {
     "cora": "#1f77b4",
     "citeseer": "#ff7f0e",
     "pubmed": "#2ca02c",
     "mag_cs": "#9467bd",
+    "amazon_computers": "#1f77b4",
+    "amazon_photo": "#ff7f0e",
+    "squirrel": "#2ca02c",
 }
 FEATURE_TITLES = {"on": "With Node Features", "off": "Without Node Features"}
 INK = "#1a1a1a"
@@ -81,6 +87,7 @@ def render_all(
     fig_dir.mkdir(parents=True, exist_ok=True)
     builders = {
         "main_bars": lambda: main_bars(results["main"]),
+        "advantage": lambda: advantage_bars(results["main"]),
         "degree_buckets": lambda: degree_buckets(results["buckets"]),
         "thinning": lambda: thinning(results["thin"]),
         "m_pinning": lambda: m_pinning(results["shape"]),
@@ -90,12 +97,15 @@ def render_all(
     for name, build in builders.items():
         key = {
             "main_bars": "main",
+            "advantage": "main",
             "degree_buckets": "buckets",
             "thinning": "thin",
             "m_pinning": "shape",
             "community": "community",
         }[name]
         if key not in results:
+            continue
+        if name == "m_pinning" and not results["shape"]["pin"]:
             continue
         path = fig_dir / f"{prefix}_{name}.png"
         build().write_image(path, scale=3)
@@ -158,12 +168,85 @@ def main_bars(main: dict[str, Any]) -> go.Figure:
             pad = 0.1 * (max(highs) - min(lows))
             figure.update_yaxes(
                 range=[min(lows) - pad, max(highs) + pad],
-                title_text=label if col == 1 else None,
+                title_text=f"$\\text{{{label}}}$" if col == 1 else None,
                 row=row,
                 col=col,
             )
     _base_layout(figure, width=1300, height=850)
     figure.update_layout(barmode="group", bargap=0.2)
+    return figure
+
+
+def advantage_bars(main: dict[str, Any]) -> go.Figure:
+    """Paired advantage of TNBBeta over the primary comparator, per cell.
+
+    Positive means TNBBeta is better. Three panels (log loss, ECE, sampled AUROC) with
+    features on and off as two series and the 95% bootstrap interval over seeds; dashed
+    lines mark the margin in the log-loss panel.
+    """
+    panels = [
+        ("log_loss", "Log Loss Advantage (Nats)"),
+        ("ece", "ECE Advantage"),
+        ("sampled_auc", "Sampled AUROC Advantage"),
+    ]
+    figure = make_subplots(
+        rows=1,
+        cols=3,
+        subplot_titles=[label.rsplit(" Advantage", 1)[0] for _, label in panels],
+        horizontal_spacing=0.09,
+    )
+    colors = {"on": "#d62728", "off": "#7f7f7f"}
+    for col, (metric, label) in enumerate(panels, start=1):
+        for features in FEATURES:
+            xs, means, plus, minus = [], [], [], []
+            for dataset in DATASETS:
+                cell = main["cells"].get(f"{dataset}|{features}")
+                if cell is None:
+                    continue
+                summary = cell["comparisons"][metric]["primary"]
+                if "ci" not in summary:
+                    continue
+                up, down = _asymmetric(summary["mean"], summary["ci"])
+                xs.append(DATASET_LABELS[dataset])
+                means.append(summary["mean"])
+                plus.append(up)
+                minus.append(down)
+            figure.add_trace(
+                go.Bar(
+                    x=xs,
+                    y=means,
+                    error_y={
+                        "type": "data",
+                        "symmetric": False,
+                        "array": plus,
+                        "arrayminus": minus,
+                        "color": INK,
+                        "thickness": 1,
+                        "width": 3,
+                    },
+                    marker={"color": colors[features]},
+                    name=f"Features {features.capitalize()}",
+                    legendgroup=features,
+                    showlegend=col == 1,
+                ),
+                row=1,
+                col=col,
+            )
+        _zero_line(figure, 1, col)
+        figure.update_yaxes(
+            title_text=f"$\\text{{{label}}}$", row=1, col=col, zeroline=False
+        )
+    margin = main.get("margin")
+    if margin:
+        for sign in (1, -1):
+            cast("Any", figure).add_hline(
+                y=sign * margin,
+                line={"color": INK, "width": 1, "dash": "dash"},
+                row=1,
+                col=1,
+            )
+    _base_layout(figure, width=1400, height=500)
+    figure.update_layout(barmode="group", bargap=0.25, margin={"b": 110})
     return figure
 
 

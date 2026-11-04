@@ -31,6 +31,7 @@ from apps.real_graph.run import (
     FEATURES,
     FINAL_SEEDS,
     PIN_FRACTIONS,
+    STUDY,
     root_dir,
     stage_dir,
 )
@@ -52,7 +53,10 @@ LOWER_IS_BETTER = ("log_loss", "ece", "centre_log_loss")
 PRIMARY_METRIC = "log_loss"
 SECONDARY_METRICS = ("sampled_auc", "centre_auc", "ap", "ece")
 COMPARATORS = ("vmf", "power_spherical")
-MARGIN = 0.05
+# Primary margin of "confirmed"; the dense study (REAL_GRAPH_STUDY=dense) registers 0.01
+# as primary and also reports 0.05 as a secondary label.
+MARGIN = 0.01 if STUDY == "dense" else 0.05
+SECONDARY_MARGIN = 0.05 if STUDY == "dense" else None
 MIN_PAIRS = 20
 EDGE_BOOTSTRAP = 1000
 LEVELS = (0.3, 0.5, 0.7, 1.0)
@@ -88,7 +92,8 @@ def main(argv: list[str] | None = None) -> None:
         results["main"] = analyze_main(main_runs)
         results["buckets"] = analyze_buckets(main_runs, args.workers)
         results["shape"] = analyze_shape(main_runs, runs.get("pin", []))
-        report += render_main(results["main"]) + render_buckets(results["buckets"])
+        report += render_tuning(results["tuned"]) + render_main(results["main"])
+        report += render_buckets(results["buckets"])
         report += render_shape(results["shape"])
         if "thin" in runs:
             results["thin"] = analyze_thinning(
@@ -163,12 +168,18 @@ def primary_comparator(
     return min(available, key=lambda c: sign * means[c])
 
 
-def paired_summary(advantage: Array, *, margin: float | None = None) -> dict[str, Any]:
+def paired_summary(
+    advantage: Array,
+    *,
+    margin: float | None = None,
+    secondary_margin: float | None = None,
+) -> dict[str, Any]:
     """Effect size, interval and exact p-values of paired per-seed advantages.
 
     Args:
         advantage: Per-seed advantages (``nan`` seeds dropped).
         margin: If given, adds the one-sided win and loss tests against this margin.
+        secondary_margin: If given (with ``margin``), adds ``p_win2``/``p_loss2`` for it.
 
     Returns:
         ``mean``, ``ci`` (95% percentile bootstrap), ``sd``, ``n``, ``p`` (two-sided
@@ -188,6 +199,13 @@ def paired_summary(advantage: Array, *, margin: float | None = None) -> dict[str
     if margin is not None:
         out["p_win"] = sign_flip_p(values, margin=margin, alternative="greater")
         out["p_loss"] = sign_flip_p(-values, margin=margin, alternative="greater")
+        if secondary_margin is not None:
+            out["p_win2"] = sign_flip_p(
+                values, margin=secondary_margin, alternative="greater"
+            )
+            out["p_loss2"] = sign_flip_p(
+                -values, margin=secondary_margin, alternative="greater"
+            )
     return out
 
 
@@ -234,6 +252,9 @@ def analyze_main(runs: list[dict[str, Any]]) -> dict[str, Any]:
                             tnb,
                         ),
                         margin=MARGIN if metric == PRIMARY_METRIC else None,
+                        secondary_margin=SECONDARY_MARGIN
+                        if metric == PRIMARY_METRIC
+                        else None,
                     ),
                     "by_comparator": {
                         c: paired_summary(
@@ -248,7 +269,7 @@ def analyze_main(runs: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             cells[cell] = {"families": stats, "comparisons": comparisons}
     _adjust_main(cells)
-    return {"cells": cells, "margin": MARGIN}
+    return {"cells": cells, "margin": MARGIN, "secondary_margin": SECONDARY_MARGIN}
 
 
 def balanced_mean(values: Array, labels: Array, mask: Mask) -> float:
@@ -639,6 +660,32 @@ def md_table(headers: list[str], rows: list[list[str]]) -> list[str]:
     return [*lines, ""]
 
 
+def render_tuning(tuned: dict[str, Any]) -> list[str]:
+    """Markdown of the selected configurations and how many sit on a grid edge."""
+    if not all("grid" in chosen for chosen in tuned.values()):
+        return []
+    lines = ["## Tuning: selected configurations (validation sampled log loss)", ""]
+    rows = []
+    hits = {"lr": 0, "dropout": 0, "dim": 0}
+    for cell, chosen in sorted(tuned.items()):
+        grid = chosen["grid"]
+        row = [cell.replace("|", " / ")]
+        for name in ("lr", "dropout", "dim"):
+            values = sorted({entry[name] for entry in grid})
+            on_edge = chosen[name] in (values[0], values[-1])
+            hits[name] += int(on_edge)
+            row.append(f"{chosen[name]:g}" + (" (edge)" if on_edge else ""))
+        row.append(f"{chosen['val_log_loss']:.4f}")
+        rows.append(row)
+    lines += md_table(["cell", "lr", "dropout", "d", "val log loss"], rows)
+    lines += [
+        f"Grid-edge selections out of {len(tuned)} cells: lr {hits['lr']}, "
+        f"dropout {hits['dropout']}, d {hits['dim']}.",
+        "",
+    ]
+    return lines
+
+
 def render_main(main: dict[str, Any]) -> list[str]:
     """Markdown of Stage 1."""
     lines = [
@@ -663,6 +710,8 @@ def render_main(main: dict[str, Any]) -> list[str]:
             if "ci" not in p:
                 continue
             extra = p.get("label", "") if metric == "log_loss" else ""
+            if metric == "log_loss" and "label_secondary" in p:
+                extra += f"; at 0.05: {p['label_secondary']}"
             adjusted = (
                 f"Holm {_fmt(p.get('p_holm'), 4)}"
                 if metric == "log_loss"
@@ -773,10 +822,11 @@ def render_shape(shape: dict[str, Any]) -> list[str]:
         for cell, v in shape["free"].items()
     ]
     lines += md_table(["cell", *keys], rows)
-    lines += [
-        "## Stage 4 (descriptive): m-pinning dose-response, f = m / ((d-1)/2)",
-        "",
-    ]
+    if shape["pin"]:
+        lines += [
+            "## Stage 4 (descriptive): m-pinning dose-response, f = m / ((d-1)/2)",
+            "",
+        ]
     for cell, content in shape["pin"].items():
         rows = []
         for fraction in PIN_FRACTIONS:
@@ -919,6 +969,11 @@ def _adjust_main(cells: dict[str, Any]) -> None:
     if all("p" in p for p in primary):
         two_sided = holm([p["p"] for p in primary])
         one_sided = holm([p["p_win"] for p in primary] + [p["p_loss"] for p in primary])
+        two_margin: list[float] = []
+        if SECONDARY_MARGIN is not None:
+            two_margin = holm(
+                [p["p_win2"] for p in primary] + [p["p_loss2"] for p in primary]
+            )
         for index, name in enumerate(names):
             summary = cells[name]["comparisons"][PRIMARY_METRIC]["primary"]
             summary["p_holm"] = two_sided[index]
@@ -937,10 +992,31 @@ def _adjust_main(cells: dict[str, Any]) -> None:
             else:
                 label = "not significant"
             summary["label"] = label
-    tests = [(c, m) for c in names for m in SECONDARY_METRICS]
-    pvalues = [cells[c]["comparisons"][m]["primary"].get("p", 1.0) for c, m in tests]
-    for (cell, metric), q in zip(tests, benjamini_hochberg(pvalues), strict=True):
-        cells[cell]["comparisons"][metric]["primary"]["q_bh"] = q
+            if SECONDARY_MARGIN is not None:
+                summary["p_win2_holm"] = two_margin[index]
+                summary["p_loss2_holm"] = two_margin[len(names) + index]
+                if summary["p_win2_holm"] < 0.05 and summary["mean"] > SECONDARY_MARGIN:
+                    summary["label_secondary"] = "confirmed win"
+                elif (
+                    summary["p_loss2_holm"] < 0.05
+                    and summary["mean"] < -SECONDARY_MARGIN
+                ):
+                    summary["label_secondary"] = "confirmed loss"
+                else:
+                    summary["label_secondary"] = "not confirmed"
+    # Revision study: one BH family over all (cell, metric) tests. Dense study: one BH
+    # family per metric, over the cells.
+    groups = (
+        [[(c, m) for c in names] for m in SECONDARY_METRICS]
+        if STUDY == "dense"
+        else [[(c, m) for c in names for m in SECONDARY_METRICS]]
+    )
+    for tests in groups:
+        pvalues = [
+            cells[c]["comparisons"][m]["primary"].get("p", 1.0) for c, m in tests
+        ]
+        for (cell, metric), q in zip(tests, benjamini_hochberg(pvalues), strict=True):
+            cells[cell]["comparisons"][metric]["primary"]["q_bh"] = q
 
 
 def _pair_losses(prob: Array, labels: Array) -> Array:

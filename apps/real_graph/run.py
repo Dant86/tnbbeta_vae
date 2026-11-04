@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import json
+import os
 from pathlib import Path
 import random
 import time
@@ -35,6 +36,7 @@ import scipy.sparse as sp
 from scipy.stats import spearmanr
 import torch
 
+from tnbbeta_vae.data.dense_graphs import DENSE_GRAPH_NAMES, load_dense_graph
 from tnbbeta_vae.data.mag_coauthor import load_mag_coauthor
 from tnbbeta_vae.data.planetoid import (
     Graph,
@@ -60,18 +62,30 @@ from tnbbeta_vae.models.real_graph_eval import (
 from tnbbeta_vae.paths import checkpoint_dir, data_dir
 from tnbbeta_vae.training import select_device
 
-DATASETS = ("cora", "citeseer", "pubmed", "mag_cs")
+DATASETS: tuple[str, ...] = ("cora", "citeseer", "pubmed", "mag_cs")
 FEATURES = ("on", "off")
 FAMILIES = ("tnbbeta", "vmf", "power_spherical", "gaussian")
-EPOCHS = {"cora": 200, "citeseer": 200, "pubmed": 400, "mag_cs": 200}
+EPOCHS: dict[str, int] = {"cora": 200, "citeseer": 200, "pubmed": 400, "mag_cs": 200}
 TUNE_SEEDS = (100, 101, 102)
 FINAL_SEEDS = tuple(range(10))
 COMMUNITY_SEEDS = tuple(range(5))
-TUNE_GRID = {
+TUNE_GRID: dict[str, tuple[Any, ...]] = {
     "lr": (0.003, 0.01, 0.03),
     "dropout": (0.0, 0.4),
     "dim": (16, 32),
 }
+# ``REAL_GRAPH_STUDY=dense`` switches to the dense real-graph study
+# (writeup/results/dense_real_graph_preregistration_2026-11-04.md): three dense graphs,
+# a wider grid, its own output directory. The default reproduces the revision exactly.
+STUDY = os.environ.get("REAL_GRAPH_STUDY", "revision")
+if STUDY == "dense":
+    DATASETS = tuple(DENSE_GRAPH_NAMES)
+    EPOCHS = dict.fromkeys(DATASETS, 200)
+    TUNE_GRID = {
+        "lr": (0.003, 0.01, 0.03),
+        "dropout": (0.0, 0.4, 0.6),
+        "dim": (16, 32, 64),
+    }
 KEEP_LEVELS = (0.7, 0.5, 0.3)
 PIN_FRACTIONS = (-0.6, -0.2, 0.0, 0.5, 1.0)
 SELECT_SAMPLES = 16
@@ -104,18 +118,23 @@ def main(argv: list[str] | None = None) -> None:
     run.add_argument("--shard", type=int, required=True)
     run.add_argument("--num-shards", type=int, required=True)
     run.add_argument("--device", default=None)
+    run.add_argument(
+        "--cell",
+        default=None,
+        help="Only the jobs of one cell, 'dataset|features'.",
+    )
     args = parser.parse_args(argv)
     if args.command == "manifest":
         write_manifest(args.stage)
     elif args.command == "select":
         select_configurations()
     else:
-        run_shard(args.stage, args.shard, args.num_shards, args.device)
+        run_shard(args.stage, args.shard, args.num_shards, args.device, args.cell)
 
 
 def root_dir() -> Path:
     """Returns (without creating) the study's output directory."""
-    return checkpoint_dir() / "real_graph"
+    return checkpoint_dir() / ("real_graph_dense" if STUDY == "dense" else "real_graph")
 
 
 def stage_dir(stage: str) -> Path:
@@ -272,11 +291,28 @@ def select_configurations() -> Path:
     return path
 
 
-def run_shard(stage: str, shard: int, num_shards: int, device_name: str | None) -> None:
-    """Runs this shard's share of the manifest, skipping finished runs."""
+def run_shard(
+    stage: str,
+    shard: int,
+    num_shards: int,
+    device_name: str | None,
+    cell: str | None = None,
+) -> None:
+    """Runs this shard's share of the manifest, skipping finished runs.
+
+    Args:
+        stage: Stage name.
+        shard: Index of this shard.
+        num_shards: Number of shards.
+        device_name: Device name, or ``None`` for ``select_device``'s choice.
+        cell: If given (``"dataset|features"``), only that cell's jobs are sharded.
+    """
     directory = stage_dir(stage)
     lines = (directory / "manifest.jsonl").read_text().splitlines()
-    jobs = [json.loads(line) for line in lines if line][shard::num_shards]
+    entries = [json.loads(line) for line in lines if line]
+    if cell is not None:
+        entries = [e for e in entries if f"{e['dataset']}|{e['features']}" == cell]
+    jobs = entries[shard::num_shards]
     device = select_device(device_name)
     failures = 0
     for job in jobs:
@@ -637,8 +673,10 @@ def _write_communities() -> None:
 
 def _load_graph(dataset: str) -> Graph:
     if dataset not in _graph_cache:
-        if dataset == "mag_cs":
-            loaded: Any = load_mag_coauthor(data_dir() / "mag_coauthor", "cs")
+        if dataset in DENSE_GRAPH_NAMES:
+            loaded: Any = load_dense_graph(data_dir() / "dense_graphs", dataset)
+        elif dataset == "mag_cs":
+            loaded = load_mag_coauthor(data_dir() / "mag_coauthor", "cs")
         else:
             loaded = load_planetoid(data_dir() / "planetoid", dataset)
         _graph_cache[dataset] = Graph(loaded.adjacency, loaded.features)
