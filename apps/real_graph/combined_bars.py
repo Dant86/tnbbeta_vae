@@ -87,11 +87,9 @@ def build_figure(cells: dict[str, Any]) -> go.Figure:
     figure = make_subplots(
         rows=2,
         cols=2,
-        subplot_titles=[
-            f"{label}, {FEATURE_TITLES[f]}" for _, label in METRICS for f in FEATURES
-        ],
+        column_titles=[FEATURE_TITLES[f] for f in FEATURES],
         horizontal_spacing=0.08,
-        vertical_spacing=0.2,
+        vertical_spacing=0.07,
     )
     for row, (metric, label) in enumerate(METRICS, start=1):
         row_lows, row_highs = [], []
@@ -151,6 +149,7 @@ def build_figure(cells: dict[str, Any]) -> go.Figure:
     figure.update_xaxes(
         showline=True, linecolor=INK, ticks="outside", tickangle=0, tickfont_size=12
     )
+    figure.update_xaxes(showticklabels=False, row=1)
     figure.update_yaxes(showline=True, linecolor=INK, gridcolor=GRID, ticks="outside")
     split = sum(MEAN_DEGREE[d] < DENSE_FROM for d in datasets) - 0.5
     for row in (1, 2):
