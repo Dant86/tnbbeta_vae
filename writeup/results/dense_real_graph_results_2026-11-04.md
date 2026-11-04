@@ -91,11 +91,49 @@ None in the pre-registered analysis. Implementation notes: (a) tuning array task
 
 Full pytest, `ruff format --check`, `ruff check .` and full `pyright` on SLURM: format/lint/pyright jobs 2313353 passed (0 errors); full pytest (job 2313354) 1,194 passed, 1 failed (the figure-count assertion, caused by the new advantage figure); after updating that assertion the revision and dense test files pass (22 passed, job 2313419) and ruff/pyright pass again (job 2313420). The full suite was not rerun after the one-line fix. Tests added: `tests/data/test_dense_graphs.py` (3) and a secondary-margin test in `tests/apps/test_real_graph_analysis.py`; the sign-flip enumeration check is the revision's existing test.
 
-## Next step (not run): edge thinning
+## Edge thinning (stage 3, run after the main-stage results were reviewed)
+
+Date: 2026-11-04. Code: branch `dense-real-graphs` (this PR), commit of the thinning figure and this section on top of `5433ea0`. Comparators are tuned once at full density (frozen `tuned.json`); each graph keeps 0.3, 0.5 and 0.7 of its edges plus the full-density main-stage runs, 10 paired seeds, 720 thinning runs (jobs 2313433, analysis 2313434; all 720 run files present, all tasks exit 0).
 
 ```bash
 export REAL_GRAPH_STUDY=dense
 uv run python -m apps.real_graph.run manifest --stage thin     # 720 runs, uses the frozen tuned.json
 STAGE=thin TOTAL_TASKS=12 sbatch --array=0-11 scripts/slurm/dense_graph.sbatch
 ANALYZE_ARGS="--stages main thin --workers 16" AUX=analyze sbatch scripts/slurm/dense_graph_aux.sbatch
+uv run python -m apps.real_graph.thinning_lines    # login node; figure below
 ```
+
+Figure: `figures/dense_thinning_lines_2026-11-04.png` (test log loss per family against fraction of edges kept, averaged over the three graphs within each seed, 95% seed-bootstrap intervals). Full tables: `$TNBBETA_CHECKPOINT_DIR/real_graph_dense/analysis.md`.
+
+### Predictions T1-T3 (Addendum 1 of the pre-registration): all met
+
+| Test | Outcome |
+|---|---|
+| T1 combined Spearman > 0, one-sided p <= 0.05 | Features off: 0.962 (log loss), 0.780 (AUROC), p < 0.001. Features on: 0.167, p = 0.016 (AUROC 0.172, p = 0.015). Met. |
+| T2 advantage at 0.3 below full density in >= 2 of 3 graphs | Features off 3 of 3; features on 2 of 3 (Squirrel is the exception: +0.0086 at 0.3, +0.0016 at 1). Met. |
+| T3 features-off log-loss advantage smaller at 0.3 by >= 0.01 nats in >= 2 of 3 graphs | 3 of 3 (drops 0.057 Computers, 0.043 Photo, 0.055 Squirrel). Met. |
+
+### Log-loss advantage over the primary comparator (a > 0: TNBBeta better)
+
+| Graph | Kept | Mean degree | Features on | Features off |
+|---|---|---|---|---|
+| Computers | 0.3 | 10.7 | -0.0006 [-0.0095, 0.0085] | +0.0078 [0.0058, 0.0099] |
+| Computers | 0.5 | 17.9 | +0.0040 [-0.0043, 0.0119] | +0.0416 [0.0394, 0.0439] |
+| Computers | 0.7 | 25.0 | +0.0082 [0.0001, 0.0150] | +0.0547 [0.0535, 0.0559] |
+| Computers | 1 | 35.8 | +0.0072 [-0.0177, 0.0257] | +0.0647 [0.0631, 0.0664] |
+| Photo | 0.3 | 9.3 | -0.0317 [-0.0993, 0.0266] | +0.0158 [0.0124, 0.0193] |
+| Photo | 0.5 | 15.6 | -0.0139 [-0.0499, 0.0197] | +0.0389 [0.0369, 0.0408] |
+| Photo | 0.7 | 21.8 | +0.0006 [-0.0235, 0.0271] | +0.0503 [0.0489, 0.0518] |
+| Photo | 1 | 31.1 | +0.0050 [-0.0237, 0.0300] | +0.0589 [0.0580, 0.0596] |
+| Squirrel | 0.3 | 22.9 | +0.0086 [0.0050, 0.0124] | +0.0133 [0.0102, 0.0162] |
+| Squirrel | 0.5 | 38.1 | +0.0063 [-0.0027, 0.0134] | +0.0448 [0.0413, 0.0481] |
+| Squirrel | 0.7 | 53.4 | +0.0098 [0.0043, 0.0149] | +0.0586 [0.0556, 0.0617] |
+| Squirrel | 1 | 76.3 | +0.0016 [-0.0162, 0.0165] | +0.0680 [0.0654, 0.0708] |
+
+### Reading
+
+* **Features off:** the advantage rises almost monotonically with retained density in every graph, with tight intervals. This is the density trend the synthetic degree table predicts, unlike the flat thinning on the four sparse graphs.
+* **Features on:** the trend is weak (combined Spearman 0.17); most per-graph intervals include 0, advantages stay under about 0.01 nats (the pre-registered margin), and Photo is a point-estimate loss at 0.3 and 0.5. Sampled AUROC is slightly worse for TNBBeta in most cells.
+* **Comparator caveat (unchanged and now sharper):** in the line figure, features off, TNBBeta and the Gaussian are nearly identical at every retention level and both sit far below vMF and PS, whose learning rate was at the grid edge. The gradient is the gap between TNBBeta/Gaussian and under-tuned vMF/PS growing with density; it does not show a TNBBeta-specific density mechanism. Tuning was done at full density only, so vMF/PS may fit sparser training sets worse still.
+* Thinning changes transitivity, isolated fraction and degree spread together with mean degree (see the analysis tables), so degree is not isolated as a cause.
+* Not run: a pinned-kappa and extended-learning-rate control for vMF/PS on the features-off cells; it is the check that separates the two readings.
