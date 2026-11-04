@@ -205,5 +205,13 @@ def test_analysis_and_figures_run_end_to_end(fabricated: Path, tmp_path: Path) -
     written = figures.render_all(
         results, tmp_path / "figures", prefix="real_graph_test"
     )
-    assert len(written) == 5
+    assert len(written) == 6
     assert all(path.exists() for path in written)
+
+
+def test_paired_summary_secondary_margin() -> None:
+    advantage = np.full(10, 0.03)
+    out = analyze.paired_summary(advantage, margin=0.01, secondary_margin=0.05)
+    assert out["p_win"] < 0.01  # 0.03 > 0.01 in every seed
+    assert out["p_win2"] > 0.5  # 0.03 < 0.05 in every seed
+    assert out["p_loss2"] == 1.0
