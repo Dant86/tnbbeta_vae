@@ -20,11 +20,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from apps.real_graph.analyze import metric_arrays
-from apps.real_graph.figures import FAMILY_STYLE, FEATURE_TITLES, GRID, INK
+from apps.real_graph.figures import (
+    DATASET_LABELS,
+    FAMILY_STYLE,
+    FEATURE_TITLES,
+    GRID,
+    INK,
+)
 from tnbbeta_vae.paths import checkpoint_dir
 from tnbbeta_vae.plotting import FONT_FAMILY, TEMPLATE_NAME
 
-__all__ = ["build_figure", "main"]
+__all__ = ["build_figure", "build_per_graph_figure", "main"]
 
 Array = npt.NDArray[np.float64]
 
@@ -34,6 +40,7 @@ FEATURES = ("on", "off")
 KEEPS = (0.3, 0.5, 0.7, 1.0)
 BOOTSTRAPS = 4000
 OUTPUT_NAME = "dense_thinning_lines_2026-11-04.png"
+PER_GRAPH_OUTPUT_NAME = "dense_thinning_lines_per_graph_2026-11-05.png"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -51,6 +58,9 @@ def main(argv: list[str] | None = None) -> None:
     out = args.fig_dir / OUTPUT_NAME
     figure.write_image(str(out), scale=3)
     print(f"Wrote {out}")
+    per_graph = args.fig_dir / PER_GRAPH_OUTPUT_NAME
+    build_per_graph_figure(arrays).write_image(str(per_graph), scale=3)
+    print(f"Wrote {per_graph}")
 
 
 def build_figure(arrays: dict[tuple[Any, ...], dict[str, Array]]) -> go.Figure:
@@ -138,6 +148,104 @@ def build_figure(arrays: dict[tuple[Any, ...], dict[str, Array]]) -> go.Figure:
     figure.update_yaxes(title_text="$\\text{Test Log Loss}$", col=1)
     for annotation in figure.layout.annotations:  # type: ignore[union-attr]
         annotation.font = {"family": FONT_FAMILY, "size": 14, "color": INK}
+    return figure
+
+
+def build_per_graph_figure(
+    arrays: dict[tuple[Any, ...], dict[str, Array]],
+) -> go.Figure:
+    """Same lines as :func:`build_figure`, one column per graph, no pooling.
+
+    Rows are features on and off; each point is the mean over the ten seeds of one
+    graph's test log loss with its 95% seed-bootstrap interval.
+
+    Args:
+        arrays: ``metric_arrays`` output.
+
+    Returns:
+        The figure (not yet written).
+    """
+    figure = make_subplots(
+        rows=len(FEATURES),
+        cols=len(DATASETS),
+        column_titles=[DATASET_LABELS[d] for d in DATASETS],
+        horizontal_spacing=0.06,
+        vertical_spacing=0.08,
+        shared_yaxes=True,
+    )
+    rng = np.random.default_rng(0)
+    for row, features in enumerate(FEATURES, start=1):
+        for col, dataset in enumerate(DATASETS, start=1):
+            for family in FAMILIES:
+                name, color = FAMILY_STYLE[family]
+                stats = [
+                    _bootstrap(
+                        _group(arrays, dataset, features, family, keep)["log_loss"],
+                        rng,
+                    )
+                    for keep in KEEPS
+                ]
+                means = [m for m, _, _ in stats]
+                figure.add_trace(
+                    go.Scatter(
+                        x=list(KEEPS),
+                        y=means,
+                        mode="lines+markers",
+                        line={"width": 1.5, "color": color},
+                        marker={"color": color, "size": 7},
+                        error_y={
+                            "type": "data",
+                            "symmetric": False,
+                            "array": [h - m for (m, _, h) in stats],
+                            "arrayminus": [m - lo for (m, lo, _) in stats],
+                            "color": color,
+                            "thickness": 1,
+                            "width": 3,
+                        },
+                        name=name,
+                        legendgroup=name,
+                        showlegend=row == 1 and col == 1,
+                    ),
+                    row=row,
+                    col=col,
+                )
+        figure.add_annotation(
+            text=FEATURE_TITLES[features],
+            x=1.0,
+            xref="paper",
+            xanchor="left",
+            y=1 - (row - 0.5) / len(FEATURES) + (0.0 if row == 1 else 0.0),
+            yref="paper",
+            textangle=90,
+            showarrow=False,
+            font={"family": FONT_FAMILY, "size": 14, "color": INK},
+        )
+        figure.update_yaxes(title_text="$\\text{Test Log Loss}$", row=row, col=1)
+    figure.update_layout(
+        template=TEMPLATE_NAME,
+        font={"family": FONT_FAMILY, "color": INK, "size": 13},
+        width=1500,
+        height=850,
+        plot_bgcolor="white",
+        margin={"l": 80, "r": 50, "t": 60, "b": 70},
+        legend={
+            "x": 0.99,
+            "y": 0.97,
+            "xanchor": "right",
+            "yanchor": "top",
+            "bgcolor": "rgba(255,255,255,0.8)",
+        },
+    )
+    figure.update_xaxes(
+        tickvals=list(KEEPS), showline=True, linecolor=INK, ticks="outside"
+    )
+    figure.update_xaxes(
+        title_text="$\\text{Fraction of Edges Kept}$", row=len(FEATURES)
+    )
+    figure.update_yaxes(showline=True, linecolor=INK, gridcolor=GRID, ticks="outside")
+    for annotation in figure.layout.annotations:  # type: ignore[union-attr]
+        if annotation.text in {DATASET_LABELS[d] for d in DATASETS}:
+            annotation.font = {"family": FONT_FAMILY, "size": 14, "color": INK}
     return figure
 
 

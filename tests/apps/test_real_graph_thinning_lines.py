@@ -10,6 +10,7 @@ from apps.real_graph.thinning_lines import (
     FEATURES,
     KEEPS,
     build_figure,
+    build_per_graph_figure,
 )
 
 
@@ -35,3 +36,12 @@ def test_no_bold_and_column_titles() -> None:
     layout: Any = build_figure(_arrays()).layout
     texts = [annotation.text for annotation in layout.annotations]
     assert texts == ["With Node Features", "Without Node Features"]
+
+
+def test_per_graph_columns_are_graphs() -> None:
+    figure = build_per_graph_figure(_arrays())
+    layout: Any = figure.layout
+    titles = [a.text for a in layout.annotations if a.textangle != 90]
+    assert titles == ["Amazon Computers", "Amazon Photo", "Squirrel"]
+    assert len(figure.data) == len(FAMILIES) * len(FEATURES) * len(DATASETS)
+    assert sum(trace.showlegend for trace in figure.data) == len(FAMILIES)
