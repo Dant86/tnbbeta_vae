@@ -103,7 +103,7 @@ ANALYZE_ARGS="--stages main thin --workers 16" AUX=analyze sbatch scripts/slurm/
 uv run python -m apps.real_graph.thinning_lines    # login node; figure below
 ```
 
-Per-graph figure (columns are graphs, rows features on and off; no pooling): `figures/dense_thinning_lines_per_graph_2026-11-05.png`, same script, same 10-seed bootstrap intervals.
+Per-graph figure (features off only, columns are graphs, x is the fraction of edges removed; no pooling): `figures/dense_thinning_lines_per_graph_2026-11-05.png`, same script, same 10-seed bootstrap intervals.
 
 Figure: `figures/dense_thinning_lines_2026-11-04.png` (test log loss per family against fraction of edges kept, averaged over the three graphs within each seed, 95% seed-bootstrap intervals). Full tables: `$TNBBETA_CHECKPOINT_DIR/real_graph_dense/analysis.md`.
 
