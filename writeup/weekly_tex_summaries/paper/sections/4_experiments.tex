@@ -36,15 +36,26 @@ namely Cora, Pubmed, Citeseer \cite{https://doi.org/10.1609/aimag.v29i3.2157}, a
 coauthorship networks from the Microsoft Academic Graph, as constructed in \cite{shchur2019overlappingcommunitydetectiongraph}. For each dataset
 and posterior approximation, we trained two VGAEs: one using the training adjacency matrix and individual node features, and one without
 individual node features. After training, we evaluated link prediction AUC and AP on a held-out set of edges.
-\Cref{fig:features-onoff-bars} shows that link prediction performance is indistinguishable between all posterior families
-with node features, while Gaussian and SphericalTNBBeta posteriors dominate without node features.
+\Cref{fig:features-onoff-bars} illustrates sampled accuracy and log loss:
 \begin{figure}[H]
     \centering
-    \includegraphics[width=\textwidth]{assets/features_onoff_bars.png}
-    \caption{Link-prediction AUC (top) and AP (bottom), with features (left) vs.\ without (right), mean
-    $\pm 1$ standard deviation over 5 seeds}
+    \includegraphics[width=\textwidth]{assets/combined_real_graph_bars_2026-11-04.png}
+    \caption{Link-prediction AUROC (top) and test log loss (bottom), with features (left) vs.\ without (right), mean
+    $\pm 1$ standard deviation over ten seeds. Each bar group is labeled with the mean node degree, and groups are separated
+    horizontally by ``high-degree'' (mean $\geq$ 10) and ``low-degree'' (mean $<$ 10) graphs}
     \label{fig:features-onoff-bars}
 \end{figure}
+Interestingly, the SphericalTNBBeta VGAE's performance gains are concentrated in a high-degree subset of the above graphs, and this is more
+pronounced in terms of the posterior predictive distribution (log-loss) than in held-out accuracy (AUROC). To confirm the effect of average
+degree, we took the three high-density graphs and randomly removed fixed fractions of their edges.
+\begin{figure}[H]
+    \includegraphics[width=\textwidth]{assets/dense_thinning_lines_per_graph_2026-11-05.png}
+    \caption{Test log loss on three high-density graphs with random subsets of edges removed}
+    \label{fig:log-loss-density}
+\end{figure}
+\Cref{fig:log-loss-density} shows that, across all high-density graphs, the SphericalTNBBeta benefits the most from high average node degree.
+All posterior families exhibit an increase in log-loss as more edges are removed, but neither of the alternative hyperspherical families exhibit
+one comparable to the SphericalTNBBeta.
 
 \Cref{fig:appx-posterior-traj} in appendix B shows that, in the MNIST experiments, the posterior $\varepsilon$ parameter always landed
 in a unimodal regime (see \Cref{thm:modality-tnbbeta}). Let $m$ denote that threshold. In the above graph representation experiments,
