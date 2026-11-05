@@ -154,10 +154,11 @@ def build_figure(arrays: dict[tuple[Any, ...], dict[str, Array]]) -> go.Figure:
 def build_per_graph_figure(
     arrays: dict[tuple[Any, ...], dict[str, Array]],
 ) -> go.Figure:
-    """Same lines as :func:`build_figure`, one column per graph, no pooling.
+    """Same lines as :func:`build_figure`, features off only, one column per graph.
 
-    Rows are features on and off; each point is the mean over the ten seeds of one
-    graph's test log loss with its 95% seed-bootstrap interval.
+    Each point is the mean over the ten seeds of one graph's test log loss with its
+    95% seed-bootstrap interval, against the fraction of edges removed (0 is the full
+    graph). Nothing is pooled across graphs.
 
     Args:
         arrays: ``metric_arrays`` output.
@@ -165,87 +166,69 @@ def build_per_graph_figure(
     Returns:
         The figure (not yet written).
     """
+    removed = [round(1.0 - keep, 10) for keep in KEEPS[::-1]]
     figure = make_subplots(
-        rows=len(FEATURES),
+        rows=1,
         cols=len(DATASETS),
         column_titles=[DATASET_LABELS[d] for d in DATASETS],
         horizontal_spacing=0.06,
-        vertical_spacing=0.08,
         shared_yaxes=True,
     )
     rng = np.random.default_rng(0)
-    for row, features in enumerate(FEATURES, start=1):
-        for col, dataset in enumerate(DATASETS, start=1):
-            for family in FAMILIES:
-                name, color = FAMILY_STYLE[family]
-                stats = [
-                    _bootstrap(
-                        _group(arrays, dataset, features, family, keep)["log_loss"],
-                        rng,
-                    )
-                    for keep in KEEPS
-                ]
-                means = [m for m, _, _ in stats]
-                figure.add_trace(
-                    go.Scatter(
-                        x=list(KEEPS),
-                        y=means,
-                        mode="lines+markers",
-                        line={"width": 1.5, "color": color},
-                        marker={"color": color, "size": 7},
-                        error_y={
-                            "type": "data",
-                            "symmetric": False,
-                            "array": [h - m for (m, _, h) in stats],
-                            "arrayminus": [m - lo for (m, lo, _) in stats],
-                            "color": color,
-                            "thickness": 1,
-                            "width": 3,
-                        },
-                        name=name,
-                        legendgroup=name,
-                        showlegend=row == 1 and col == 1,
-                    ),
-                    row=row,
-                    col=col,
+    for col, dataset in enumerate(DATASETS, start=1):
+        for family in FAMILIES:
+            name, color = FAMILY_STYLE[family]
+            stats = [
+                _bootstrap(
+                    _group(arrays, dataset, "off", family, keep)["log_loss"], rng
                 )
-        figure.add_annotation(
-            text=FEATURE_TITLES[features],
-            x=1.0,
-            xref="paper",
-            xanchor="left",
-            y=1 - (row - 0.5) / len(FEATURES) + (0.0 if row == 1 else 0.0),
-            yref="paper",
-            textangle=90,
-            showarrow=False,
-            font={"family": FONT_FAMILY, "size": 14, "color": INK},
-        )
-        figure.update_yaxes(title_text="$\\text{Test Log Loss}$", row=row, col=1)
+                for keep in KEEPS[::-1]
+            ]
+            means = [m for m, _, _ in stats]
+            figure.add_trace(
+                go.Scatter(
+                    x=removed,
+                    y=means,
+                    mode="lines+markers",
+                    line={"width": 1.5, "color": color},
+                    marker={"color": color, "size": 7},
+                    error_y={
+                        "type": "data",
+                        "symmetric": False,
+                        "array": [h - m for (m, _, h) in stats],
+                        "arrayminus": [m - lo for (m, lo, _) in stats],
+                        "color": color,
+                        "thickness": 1,
+                        "width": 3,
+                    },
+                    name=name,
+                    legendgroup=name,
+                    showlegend=col == 1,
+                ),
+                row=1,
+                col=col,
+            )
     figure.update_layout(
         template=TEMPLATE_NAME,
         font={"family": FONT_FAMILY, "color": INK, "size": 13},
         width=1500,
-        height=850,
+        height=520,
         plot_bgcolor="white",
-        margin={"l": 80, "r": 50, "t": 60, "b": 70},
-        legend={
-            "x": 0.99,
-            "y": 0.97,
-            "xanchor": "right",
-            "yanchor": "top",
-            "bgcolor": "rgba(255,255,255,0.8)",
-        },
+        margin={"l": 80, "r": 30, "t": 60, "b": 130},
+        legend={"orientation": "h", "x": 0.5, "xanchor": "center", "y": -0.28},
     )
     figure.update_xaxes(
-        tickvals=list(KEEPS), showline=True, linecolor=INK, ticks="outside"
-    )
-    figure.update_xaxes(
-        title_text="$\\text{Fraction of Edges Kept}$", row=len(FEATURES)
+        title_text="$\\text{Fraction of Edges Removed}$",
+        tickvals=removed,
+        zeroline=False,
+        showline=True,
+        linecolor=INK,
+        ticks="outside",
     )
     figure.update_yaxes(showline=True, linecolor=INK, gridcolor=GRID, ticks="outside")
+    figure.update_yaxes(title_text="$\\text{Test Log Loss}$", col=1)
     for annotation in figure.layout.annotations:  # type: ignore[union-attr]
-        if annotation.text in {DATASET_LABELS[d] for d in DATASETS}:
-            annotation.font = {"family": FONT_FAMILY, "size": 14, "color": INK}
+        annotation.font = {"family": FONT_FAMILY, "size": 14, "color": INK}
     return figure
 
 

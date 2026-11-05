@@ -38,10 +38,12 @@ def test_no_bold_and_column_titles() -> None:
     assert texts == ["With Node Features", "Without Node Features"]
 
 
-def test_per_graph_columns_are_graphs() -> None:
+def test_per_graph_is_features_off_by_fraction_removed() -> None:
     figure = build_per_graph_figure(_arrays())
     layout: Any = figure.layout
-    titles = [a.text for a in layout.annotations if a.textangle != 90]
+    titles = [a.text for a in layout.annotations]
     assert titles == ["Amazon Computers", "Amazon Photo", "Squirrel"]
-    assert len(figure.data) == len(FAMILIES) * len(FEATURES) * len(DATASETS)
+    assert len(figure.data) == len(FAMILIES) * len(DATASETS)
     assert sum(trace.showlegend for trace in figure.data) == len(FAMILIES)
+    assert list(figure.data[0].x) == [0.0, 0.3, 0.5, 0.7]
+    assert layout.legend.orientation == "h"
